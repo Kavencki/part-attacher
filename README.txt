@@ -1,271 +1,201 @@
-PART ATTACHER - bet kokia detale ant bet kokios masinos (BeamNG.drive 0.40)
-===========================================================================
-Mod author: Kavencki - Giedrius P.        Versija: 1.0 beta
-English: README_EN.txt
-(c) 2026 Kavencki. Visos teises saugomos. Platinti, perkelti ar skelbti kaip
-savo be autoriaus leidimo draudziama.
+PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
+==============================================================================
+Mod author: Kavencki - Giedrius P.        Version: 1.0 beta
+(c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
+publish this mod as your own without the author's permission.
 
 
-KALBA / LANGUAGE
------------------
-Lango apacioje "Language / Kalba": English (numatyta) arba Lietuviu.
-Pasirinkimas issaugomas (settings/partAttacher/settings.json).
-At the bottom of the window: "Language / Kalba" - English (default) or Lithuanian.
-Vertimai: lua/ge/extensions/partAttacher/lang.lua
-
-Kaip naudoti
+WHAT IT DOES
 ------------
-1. Isek i masina, ant kurios nori deti detale.
-2. Spausk  Ctrl + Shift + Y  arba ESC > Mods > Part Attacher > "ATIDARYTI PART
-   ATTACHER" (arba konsoleje:  partAttacher.toggleWindow() ).
-   Klavisa galima pakeisti: Options > Controls > Gameplay > "Part Attacher".
-3. "Modelis" - pasirink masina, IS KURIOS imsi detale (bet kuri masina ar mod'as).
-   Detales suskirstytos aplankais (Front Bumper, Rear Bumper, Hood...). Arba ieskok.
-4. "Sukurti detale" - atsiras PERZIUROS detale, kabanti ore virs tavo masinos.
-5. Stumdyk X/Y/Z ir pasukimo slankiklius (Ctrl+click = ivesti skaiciu, -/+ = mazas
-   zingsnis). "Donoro vieta" - ten, kur detale butu ant savo originalios masinos.
-6. "PRITVIRTINTI (idiegti i masina)" - perziuros objektas dingsta, o tavo masina
-   persikrauna SU ta detale savo jbeam'e. Detale tampa tikra masinos dalimi
-   (ne atskira "masina"), privirinama prie artimiausiu tvirtu kebulo tasku sijomis
-   tokio ilgio, koks yra tarpas - todel niekas netraukiama ir nelamdoma.
-   Po R (reset) detale islieka.
-7. "3. Idiegtos detales": "Perkelti" - nuima detale ir vel leidzia ja stumdyti,
-   "Nuimti" - pasalina is masinos.
+- Put any part (bumpers, fenders, bars, lights...) from any vehicle - official or
+  modded - onto your vehicle. The part becomes a real part of your car's jbeam
+  (not a separate "vehicle"), welded to the body, and it stays after a reset.
+- ENGINE SWAP, GEARBOX SWAP and FRONT / REAR SUSPENSION SWAP from any vehicle.
+- TURBO / SUPERCHARGER and RADIATOR from any vehicle onto your engine.
+- UNIVERSAL DRIVETRAIN: RWD / FWD / AWD with any gearbox, lockable differentials,
+  switchable 2WD / 4WD and low range - all switched while driving.
+- Model-only parts (static mesh, no physics), mirror copies, auto positioning,
+  part size (scale).
+- SAFETY ELECTRONICS on any vehicle: ABS, traction control, stability control,
+  2-step launch control, line lock.
+- Everything is saved with the game's own vehicle save and loads on any map.
+- English and Lithuanian UI.
 
-ENGINE SWAP (variklio keitimas)
--------------------------------
-1. Isek i masina, kurios varikli nori pakeisti.
-2. "Modelis" - masina, IS KURIOS imsi varikli. Sarase atsidaryk aplanka
-   ">> VARIKLIO SWAP" - ten visi to modelio varikliai su ~kW, max rpm ir kuru.
-   (kW - bazine kreive; turbo / ECU / internals detales prideda daugiau.)
-3. "ENGINE SWAP - perziura" - naujas variklis atsiras toje vietoje, kur yra
-   senasis (variklio centrai sulyginti). Pastumk / pasuk, jei reikia.
-4. "ATLIKTI ENGINE SWAP" - LOGIC SWAP: tavo variklio fizika (blokas, pagalves,
-   jungtys su pavaru deze) lieka gamykline, todel niekas nesulus ir nenuskris.
-   Is donoro perkeliami visi variklio duomenys: galios / sukimo momento kreive,
-   apsukos, inercija, turbo / kompresorius, ECU, internals, garsas (paimti is
-   pilnai uzkrautos perziuros). Donoro variklio modelis pakeicia tavo variklio
-   modeli (galima isjungti). Pavaru deze lieka tavo, kuras - tavo bako.
-   TIUNINGAS: iprastame Parts meniu po varikliu atsiranda DONORO variklio
-   slotai (ECU, internals, intake / turbo, kompresorius, N2O) - rinkis kaip
-   iprastai. Jie ikeliami be fizikos (tik duomenys, garsas ir modelis).
-5. "3. Idiegtos detales": "Perkelti" - grazina sena varikli ir leidzia nauja
-   pastumdyti; "Grazinti originalu" - atsaukia swap'a.
 
-GEARBOX SWAP (pavaru dezes keitimas)
-------------------------------------
-1. "Modelis" - masina, IS KURIOS imsi deze. Aplankas ">> PAVARU DEZES SWAP"
-   (rodomas tipas: manual / automatic / dct / cvt / sequential).
-2. "GEARBOX SWAP - perziura" -> pastumk, jei reikia -> "ATLIKTI GEARBOX SWAP".
-3. "Kartu ijungti universalias pavaras" (rekomenduojama) - kad galia tikrai
-   pasiektu ratus su bet kokia deze.
+INSTALL
+-------
+Put the zip into  Documents/BeamNG.drive/mods  (or %LOCALAPPDATA%/BeamNG/
+BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 
-AUTO VIETA IR VEIDRODIS
+
+QUICK START
+-----------
+1. Get into the vehicle you want to modify.
+2. Press  Ctrl + Shift + Y  to open the window (rebind it in Options > Controls >
+   Gameplay > "Part Attacher: open / close window"), or press ESC and pick
+   Mods > Part Attacher > "OPEN PART ATTACHER".
+3. Section 1: pick the "Model" you want a part FROM. Its parts are shown like
+   the game's own Parts menu (slot tree; the default part is marked *), with the
+   swap folders on top. Or type in "Search parts".
+4. Press the button at the bottom of section 1: a PREVIEW of the part appears.
+5. Section 2: move / rotate it (X / Y / Z, pitch / roll / yaw; Ctrl+click a
+   slider to type a value), then press ATTACH. Your vehicle reloads with the
+   part built in.
+6. Section 3 lists everything you added: Move, Remove, Mirror, Restore original,
+   and "With physics" / "Model only" to switch an installed part in place.
+   Section 2 shows the preview's mode (MODEL ONLY or with physics) with a
+   button to switch it - the "Model only" checkbox of section 1 stays ticked
+   until you untick it.
+
+
+SECTION 1 - PICK A PART
 -----------------------
-- "Auto vieta" (1 dalis, ijungta): nauja detale atsiranda ten, kur stovi tavo
-  masinos tokia pati detale (buferis ant buferio, kapotas ant kapoto) - slotai
-  lyginami be modelio vardo (pickup_bumper_F ~ etk800_bumper_F). 2 dalyje
-  mygtukas "Kaip mano masinos detale" grazina i ta vieta.
-- "Veidrodine kopija" (2 dalis) ir "Veidrodis" (3 dalis): ta pati detale kitoje
-  masinos puseje. Jei donoras turi kitos puses detale (door_FL -> door_FR,
-  mirror_L -> mirror_R), imama ji; jei ne - ta pati, pastatyta veidrodiskai.
-  Atsiranda perziura: pastumdyk, jei reikia, ir PRITVIRTINK.
+- "Auto position" (on by default): a new part appears where your vehicle's part
+  of the same kind is (bumper on bumper, hood on hood).
+- "Model only (no physics)": the part comes as its model only - no weight, no
+  collisions, never breaks, it just moves with the vehicle. Parts whose model
+  hangs on their own car's body (radiators...) always come like this.
+- "Vehicle paint": paint the part in your vehicle's colours.
+- "All parts by type" at the bottom: every part, including common ones and
+  other vehicles' parts.
 
-DYDIS (scale)
--------------
-- 2 dalyje "Dydis (scale)": detale sumazinama arba padidinama (x0.1 - x5,
-  Ctrl+click - ivesti iki x10). Didinama / mazinama apie savo centra - ir
-  modelis, ir fizika. Atleidus slankikli perziura persikrauna; "Tikras dydis"
-  grazina x1. 3 dalyje rodomas dydis (pvz. x1.50), Perkelti / Veidrodis ji
-  islaiko. Zibintai ir kiti "props" ant detales lieka savo dydzio.
 
-SNORKELIS
----------
-- Pritvirtintas snorkelis (ar bet kuri detale su oro paemimo taskais) veikia
-  tikrai: variklis ima ora ir per ji, todel uzlieja tik tada, kai po vandeniu
-  atsiduria ir snorkelio virsus (veikia ir kaip "Tik modelis"). last_load.log
-  rasoma "the engine takes its air through it too".
+SECTION 2 - POSITION AND MOUNTING
+---------------------------------
+- Donor position / On the roof / Like my vehicle's part: quick positions.
+- "Size (scale)": make the part smaller or bigger (x0.1 - x5, Ctrl+click to type
+  up to x10). It grows / shrinks around its centre - model and physics both.
+  The preview reloads when you let go of the slider; "Real size" goes back to
+  x1. Section 3 shows the size (e.g. x1.50) and Move / Mirror keep it. Lights
+  and other props on the part keep their own size.
+- Snorkel: an attached snorkel (or any part with air intake points) really
+  works - your engine takes its air through it too and floods only when the
+  snorkel's top goes under water as well (also as "Model only"). The load log
+  says "the engine takes its air through it too".
+- "Mirror copy": the same part on the other side. If the donor has the
+  other-side part (door_FL -> door_FR, mirror_L -> mirror_R) that one is used.
+- Virtual mount (parts with physics): the part is never welded to your car's
+  nodes directly. 8 light frame points around it hold every node of the part,
+  and only those points are welded to the car's structure (chassis / frame /
+  body, spread out, sized to the node masses). The part keeps its own weight,
+  beams and collisions - a bull bar works as a bull bar. Its links to the
+  donor car's body (frame, bumper) are left out, so they can't grab your car.
+- Weld points (welds per frame point = weld points / 3), Max gap (the frame
+  reaches 3x as far, at least 1 m), Strength / Unbreakable, No collisions.
+  Strength is per weld beam: it breaks at that force and starts to bend at
+  half of it. Default 40000 N (BeamNG mounts its own bumpers with 28000 N).
+- "Crash protection for the first 2.5 s": after a spawn / reset nothing bends
+  or breaks for 2.5 s while new parts settle, then normal damage returns.
 
-TIK MODELIS (be fizikos, "static mesh")
---------------------------------------
-- Varnele "Tik modelis (be fizikos)" 1 dalyje: detale atsiras tik kaip modelis -
-  nesveria, nesimusa, nelusta, tik juda kartu su masina. Stumdyk kaip iprasta
-  (X/Y/Z, pasukimas) ir spausk PRITVIRTINTI.
-- Detales, kuriu modelis kabo ant savo masinos kebulo (radiatorius ir pan.),
-  taip rodomos automatiskai - kitaip ju perziura butu nematoma.
-- 3 dalyje tokia detale pazymeta "[tik modelis]". Mygtukas "Su fizika" ja
-  toje pacioje vietoje pavercia detale su fizika (virtualus tvirtinimas),
-  "Tik modelis" - atvirksciai.
-- 2 dalyje rodomas perziuros rezimas (TIK MODELIS / su fizika) ir mygtukas jam
-  pakeisti. Varnele "Tik modelis" 1 dalyje lieka pazymeta, kol jos nenuimi.
 
-TURBO / KOMPRESORIUS (logic)
-----------------------------
-- Aplankas ">> TURBO / KOMPRESORIUS (logic)": bet kurios masinos turbinos ir
-  kompresoriai (pasirink modeli 1 dalyje, pvz. bastion, etk, pickup...).
-- "PRITAIKYTI TURBO / KOMPRESORIU": tavo varikliui perkeliami jo duomenys
-  (slegis, wastegate, inercija, kreive) ir garsas (svilpimas, BOV, whine).
-  Imama ir is jo pod-detaliu (twin turbo ijungiamas kolektoriuje).
-- Donoro nustatymai (pvz. Wastegate Pressure) atsiranda iprastame Tuning meniu.
-- Veikia ir ant swap'into variklio. Atsaukti: 3 dalyje "Grazinti originalu".
+ENGINE SWAP  (folder ">> ENGINE SWAP")
+-----------
+A LOGIC swap: your engine's physics (block, mounts) stay, so nothing breaks or
+flies off. The donor's power and torque curves, revs, inertia, sound and (if you
+want) its model come over. The donor's tuning slots (ECU, internals, intake /
+turbo, N2O) appear in the normal Parts menu under the engine. Your gearbox and
+fuel stay yours; extra engine outputs (air compressor, PTO on trucks) keep working.
 
-RADIATORIUS (ausinimas, logic)
-------------------------------
-- Radiatorius beveik vien duomenys (2 mazgai ir modelis, kabantis ant savo
-  masinos kebulo), todel atskirai jo atspawninti negalima - perziura nematoma.
-- Aplankas ">> RADIATORIUS (ausinimas, logic)": pasirink ir spausk
-  "PRITAIKYTI RADIATORIU". Tavo radiatorius ir modelis lieka, varikliui
-  perkeliami donoro ausinimo duomenys: plotas, efektyvumas, ausinimo skyscio
-  kiekis, ventiliatorius, termostatas. Atsaukti: 3 dalyje "Grazinti originalu".
-- Veikia tik varikliams, kuriems skaiciuojama temperatura (thermals).
 
-PAKABA LOGIC (rekomenduojama) - 5 dalis lange
-----------------------------------------------
-Tavo pakabos geometrija ir fizika lieka (niekas nelus), keiciasi charakteris:
-- Pakabu aplanke pasirink donoro pakaba ir spausk "LOGIC: perkelti tik
-  charakteri" - perkeliami donoro spyruokliu, amortizatoriu ir stabilizatoriaus
-  standumai (vidurkiai is jo jbeam, su numatytais kintamaisiais).
-- 5 dalyje priekiui ir galui atskirai: prosvaisa (-20..+60 cm, kartu
-  prailginami ir amortizatoriu eigos ribotuvai), spyruokles x, amortizatoriai x,
-  stabilizatorius x (iki x6; amortizatoriai dar ribojami pagal mazgu mase -
-  sunkvezimio amortizatoriai ant lengvos masinos sprogdindavo fizika). "PRITAIKYTI PAKABA" / "Atstatyti".
-- Pastaba: lingines spyruokles (tiltai su lingemis) nera "bounded" spyruokles,
-  joms prosvaisa / standumas gali neveikti - amortizatoriai ir stabilizatorius veikia.
+GEARBOX SWAP  (folder ">> GEARBOX SWAP")
+------------
+Any gearbox (manual / automatic / DCT / CVT / sequential). Tick "Also enable the
+universal drivetrain" so the power reaches the wheels with any gearbox.
 
-PAKABOS SWAP (priekine / galine) - eksperimentinis tikras geometrijos swap
---------------------------------
-1. "Modelis" - masina, IS KURIOS imsi pakaba. Aplankai
-   ">> PRIEKINE PAKABA" ir ">> GALINE PAKABA".
-2. "... SWAP - perziura" - nauja pakaba atsiras ten, kur yra senoji.
-   Pastumk (pvz. Y - kad ratai butu arkose, Z - aukstis).
-3. "ATLIKTI PAKABOS SWAP" - sena pakaba su visais savo ratais, stebulemis,
-   amortizatoriais, stabdziais ir vairavimu dingsta, idedama nauja.
-   Kartu "atsinesami" donoro remo taskai, prie kuriu pakaba buvo prisukta
-   (amortizatoriu virsus, lingiu kabliai, vairo deze, diferencialo laikikliai)
-   - jie privirinami prie tavo kebulo. Svirtys, tiltas ir amortizatoriai lieka
-   judantys, vairo hydros veikia.
-   Visas naujos pakabos medis gauna unikalius mazgu ir begiu vardus
-   (nesusipina su kebulu) ir nesimusa su savo kebulu - todel nesprogsta.
-   Senesne versija padarytam swap'ui 3 dalyje yra mygtukas "PATAISYTI".
-4. Jei naujos pakabos velenai nerastu tavo masinos pavaru - automatiskai
-   ijungiamos universalios pavaros (pagal 4 dalies nustatymus). Tai ypac
-   svarbu LIVE AXLE (tiltams): tilto diferencialas iesko donoro kardano,
-   kurio tavo masina neturi.
-5. "3. Idiegtos detales": "Perkelti" / "Grazinti originalia".
-- ANTRA GALINE ASIS (6 ratai): galines pakabos aplanke spausk "PRIDETI KAIP
-  ANTRA GALINE ASI". Tavo galine pakaba lieka, nauja asis atsiranda uz jos ant
-  savo virtualaus remo (2 dalyje pastumk Y). Jos ratai gauna savo vardus, o abi
-  galines asys varomos universaliomis pavaromis (tarp ju - tarpasinis
-  diferencialas; uzrakinamas su "Galinis" locker).
-   Anksciau padarytam swap'ui spausk "PATAISYTI" - ijungs ir pavaras, jei reikia.
-- Stabilumas: atsinesti donoro remo taskai islaiko donoro mase; jei i ta pati
-  kebulo taska eina daug suvirinimu, ju standumas automatiskai sumazinamas
-  pagal mazgo mase, o per lengviems mazgams pridedama mases tiek, kiek reikia
-  (kitaip fizika "sprogsta" - Instability detected).
-- Naujos pakabos spyruokles issitempia per 0,5 s (ne smugiu spawn'o metu).
-- Donoro remo taskai ieskomi VISOSE donoro detalese (pvz. desert pakaba
-  kabo ant pickup_desert_frame tasku, kuriu iprastas remas neturi). Jei kokio
-  tasko nerasta, konsoleje: "donor nodes not found, rows on them dropped".
-- HOOK'AI: pakabos taskai, kuriuos donoro remas PRISUKES - laiko bent 3
-  paprastos sijos i 3 skirtingus remo taskus (pvz. pickup 4-link svirciu
-  priekiniai galai rx1l / rx1r, amortizatoriu virsus rs2l). Tos tvirtinimo
-  sijos ir ju remo taskai neatsinesami - hook'a laiko virtualus remas.
-  Taskai, laikomi tik 1-2 sijomis (skersine traukle, svirtys), JUDA - ju sijos
-  atsinesamos su tiksliu remo tasku, kaip donore. Taip pat atsinesamos
-  "darbines" remo sijos (atsokos buferiai, ribotuvai).
-- Pakabos perziura suklijuojama standziai (nebesisuka, ratai neskraido).
-- VIRTUALUS REMAS (kiekvienam pakabos swap'ui): 8 sunkus nauji mazgai (deze
-  aplink hook'us). Visi hook'ai ir atsinesti donoro taskai laikomi visu 8
-  kampu, ir TIK sie 8 kampai privirinami prie tavo kebulo (kiekvienas prie
-  ~8 kebulo tasku). Pakaba kabo ant savo remo, ne ant kebulo. Remas nematomas (tik fizika),
-  pamatyti galima su Ctrl+B (sijos). Pati pakaba (be padangu) ir kebulo
-  zona aplink tvirtinimo taskus NIEKADA nesilanksto ir nelusta - svetimo tilto
-  svoris nebesuplesys kebulo. Senam swap'ui - "PATAISYTI".
-- Naujos pakabos padangos nesimusa su savo kebulu (didesni donoro ratai
-  dazniausiai lenda i arkas). Su zeme - kaip iprastai.
 
-UNIVERSALIOS PAVAROS (4 dalis lange)
-------------------------------------
-Viskas, kas yra UZ pavaru dezes (kardanas, skirstymo deze, diferencialai,
-pusasiai), ismetama ir sugeneruojama is naujo pagal tikras ratu vietas:
-- Varomi ratai: RWD / FWD / AWD (su centriniu diferencialu ir galios
-  paskirstymu priekis/galas).
-- Diferencialo tipas: open / lsd / viscous / locked.
-- Uzrakinami (locker): priekinis, galinis, centrinis (AWD). Toks diferencialas
-  turi 2 rezimus - pasirinktas tipas ir "locked" (abi puses sukasi vienodai).
-  Perjungiama vaziuojant: 4 dalyje "Perjungti vaziuojant" (Priekinis / Galinis /
-  Centrinis / Visi), zaidimo klavisu "Toggle differential mode" arba zaidimo
-  powertrain UI mygtukais.
-- Perjungiamas 2WD / 4WD (part-time, tik AWD): vietoj centrinio diferencialo -
-  skirstymo deze kaip visureigiuose: 2WD (galas) arba 4WD (priekis ir galas
-  sujungti 50 / 50). Pradzioje 2WD. Ant sauso asfalto 4WD posukiuose "stringa".
-- Zemoji pavara (low range): papildoma deze po pavaru deze, High (1:1) arba Low
-  (santykis 1.5 - 4.5, numatyta 2.72) - letai, bet labai stipriai.
-- Viska perjungi vaziuojant: 4 dalyje "Perjungti vaziuojant" - 2WD / 4WD,
-  High / Low, Priekinis / Galinis / Centrinis, Visi diferencialai.
-- Galutine pavara (final drive). "Nuskaityti dabartine" - paima, kokia yra dabar.
-- Veikia su 3 asiu sunkvezimiais (tandem) ir dvigubais ratais (dually).
-- Masinos ratu velenai (spindle) prijungiami prie nauju diferencialu.
-Taip BET KOKS variklis + BET KOKIA deze + BET KOKIA masina varo ratus.
-Pastaba: tai fizika, ne modelis - naujo kardano meso nesimato.
-
-MASINOS ISSAUGOJIMAS
+TURBO / SUPERCHARGER  (folder ">> TURBO / SUPERCHARGER (logic)")
 --------------------
-- Naudok zaidimo iprasta issaugojima (Vehicle Config > Save): kartu issaugoma
-  VISKAS, ka padare mod'as - detales, engine / gearbox / pakabos swap'ai,
-  universalios pavaros, logic pakaba, tiuningas, saugos elektronika, spalva.
-  Uzsikrauna bet kuriame map'e.
-- Svarbu: Part Attacher mod'as turi buti ijungtas (be jo swap'ai neuzsikrauna).
+Pick any vehicle's turbo or supercharger: its data (boost curve, wastegate,
+inertia) and sounds (spool, BOV, whine) go onto your engine - also a swapped one.
+Its settings (e.g. Wastegate Pressure) appear in the normal Tuning menu.
 
-SAUGOS ELEKTRONIKA (6 dalis lange)
-----------------------------------
-Pazymek, ko reikia, ir spausk "IDIEGTI / ATNAUJINTI" (masina persikrauna):
-- ABS - stabdant ratai neuzsiblokuoja (visi ratai).
-- Traction control (TC) - nukerta gaza / pristabdo buksuojanti rata.
-- Stabilumo kontrole (ESC) - pristabdo ratus, kad masina neslystu ir nesisuktu.
-  Nustatymai bendri (ne pagal konkrecia masina).
-- 2-step (launch control) - startui laiko pasirinktus apsisukimus: stovint
-  laikyk stabdi + pilna gaza, atleisk stabdi.
-- Line lock - laiko priekinius stabdzius, galiniai ratai buksuoja (burnout).
-Vaziuojant: TC / ESC rezimai (ESC + TC / TC / Off), 2-step ir line lock
-ijungiami radialiniame meniu (Vehicle features) arba Options > Controls
-klavisais ("Toggle ESC mode", "Toggle Two-Step", "Toggle Line Lock").
-Ko masina jau turi pati (savo ESC / TC, 2-step), lieka jos - mod'as to nekeicia.
 
-APSAUGA NUO SUDAUZYMO (nusistovejimas)
---------------------------------------
-"Apsauga nuo sudauzymo pirmas 2.5 s" (ijungta pagal nutylejima): po kiekvieno
-spawn'o / persikrovimo / R visos masinos sijos 2,5 s nesilanksto ir nelusta,
-kol naujos detales nusistovi. Po to grazinama iprasta zalos fizika
-(konsoleje: "settle time over, damage back on").
-
-Virtualus tvirtinimas (detales su fizika)
------------------------------------------
-- Detale niekada nevirinama tiesiai prie tavo masinos tasku. Aplink ja
-  sukuriami 8 lengvi remo taskai, kurie laiko kiekviena detales taska, ir tik
-  jie privirinami prie masinos strukturos (chassis / frame / body, isskirstyta,
-  standumas pagal tasku mase). Detale turi savo svori, sijas ir susidurimus -
-  bullbar veikia kaip bullbar.
-- Detales sijos ir trikampiai i donoro masinos kebula (remas, buferis) ismetami:
-  jie nebegali prisikabinti prie tavo masinos tasku tokiais paciais vardais.
-- Detales trikampiai, kurie atsiranda kebulo viduje, kebulo nestumia.
-
-Nustatymai
-----------
-- Suvirinimo tasku: viso suvirinimu; vienam remo taskui - sis skaicius / 3.
-- Maks. tarpas: kiek toli detales taskas gali buti nuo kebulo tasko (m).
-  Jei rodo "Per toli" - priartink detale arba padidink si skaiciu. Remas
-  privirinamas 3 kartus toliau (bent 1 m).
-- Stiprumas (N): vienos suvirinimo sijos jega, nuo kurios ji nutruksta;
-  lankstytis pradeda nuo puses. Numatyta 40000 (BeamNG savo buferi tvirtina
-  28000 N sijomis). "Nesulauzoma" - niekada.
-- Be susidurimu: detale nesimus su kitomis masinomis (tik dekoracija).
-- Masinos spalva: detale nudazoma tavo masinos spalva.
-
-Pastabos
+RADIATOR  (folder ">> RADIATOR (cooling, logic)")
 --------
-- Pritvirtinant masina persikrauna (kaip keiciant detales Parts meniu) -
-  sutaisoma ir lieka toje pacioje vietoje.
-- Kai kurios detales neturi savo mazgu (tik vizualios, pvz. lipdukai) -
-  jas atskirai sukurti negalima, modas apie tai pranes.
-- Ratu mazgai suvirinimui nenaudojami.
+Your radiator stays; your engine gets the donor's cooling data (area,
+effectiveness, coolant volume, fan, thermostat). Only for engines with
+temperature simulation.
+
+
+SUSPENSION
+----------
+- LOGIC (recommended, never breaks): in a suspension folder pick a donor and press
+  "LOGIC: take over only the character" - its spring, damper and sway bar rates
+  go onto your own suspension. Section 5 adjusts front / rear separately: ride
+  height (-20..+60 cm), springs x, dampers x, sway bar x.
+- SUSPENSION SWAP (experimental): the real donor suspension with its wheels,
+  hubs, dampers, brakes and steering. It hangs on its own invisible virtual
+  frame that is welded to your body, so a foreign axle can't tear the body
+  apart. Live axles, links and coilovers are supported. Older swaps get a FIX
+  button in section 3. If the new suspension's shafts can't find your drivetrain,
+  the universal drivetrain switches on by itself.
+- SECOND REAR AXLE (6 wheels): in the rear suspension folder press "ADD AS A
+  SECOND REAR AXLE". Your rear suspension stays; the new axle comes behind it on
+  its own virtual frame (move Y in section 2), with its own wheel names. Both rear
+  axles are driven by the universal drivetrain (an inter-axle differential
+  between them; lock it with the Rear locker).
+
+
+SECTION 4 - UNIVERSAL DRIVETRAIN
+--------------------------------
+Everything after the gearbox (driveshaft, transfer case, differentials, half
+shafts) is rebuilt from the real wheel positions:
+- Driven wheels: RWD / FWD / AWD (center differential + front share).
+- Differential type: open / lsd / viscous / locked; final drive.
+- Lockable (locker): Front / Rear / Center (both axles together). A lockable
+  diff has two modes: the chosen type and "locked" (both sides turn alike).
+- Switchable 2WD / 4WD (part-time, AWD): a transfer case - 2WD (rear) or 4WD
+  (front and rear locked 50 / 50). Starts in 2WD.
+- Low range: High (1:1) or Low (ratio 1.5 - 4.5, default 2.72).
+- "Switch while driving": 2WD / 4WD, High / Low, Front / Rear / Center,
+  LOCK EVERYTHING / UNLOCK EVERYTHING. The game's "Toggle differential mode"
+  key and its powertrain UI buttons work too.
+- Works with 3-axle trucks (tandem) and dually wheels. Physics only - no
+  driveshaft model is drawn.
+
+
+SAVING YOUR VEHICLE
+-------------------
+Use the game's own save (Vehicle Config > Save): everything the mod did -
+parts, swaps, drivetrain, tuning, safety electronics, paint - is saved with the
+vehicle, and it loads on any map. Part Attacher must be enabled when you load
+such a vehicle.
+
+
+SECTION 6 - SAFETY ELECTRONICS
+------------------------------
+Tick what you want and press "INSTALL / UPDATE" (the vehicle reloads):
+- ABS - the wheels never lock up when braking (all wheels).
+- Traction control (TC) - cuts the throttle / brakes a spinning wheel.
+- Stability control (ESC) - brakes wheels to stop sliding and spinning out.
+  Generic settings, not tuned for the vehicle.
+- 2-step (launch control) - holds the chosen rpm for a launch: standing still,
+  hold the brake + full throttle, then let go of the brake.
+- Line lock - holds the front brakes while the rear wheels spin (burnout).
+While driving: TC / ESC modes (ESC + TC / TC / Off), 2-step and line lock are
+switched in the radial menu (Vehicle features) or with the Options > Controls
+keys "Toggle ESC mode", "Toggle Two-Step", "Toggle Line Lock". What the vehicle
+already has of its own (its ESC / TC, 2-step) stays as it is.
+
+
+LANGUAGE
+--------
+At the bottom of the window: "Language / Kalba" - English (default) or Lithuanian.
+
+
+TROUBLESHOOTING
+---------------
+- Every load of a modded vehicle writes  settings/partAttacher/last_load.log
+  (what was built, what was left out, which nodes needed more mass). If a
+  vehicle explodes or a part hangs loose, that file tells why - please attach it
+  to bug reports.
+- After changing mod files: Ctrl+L reloads Lua, Ctrl+R reloads the vehicle.
+- "Instability detected": try the suspension LOGIC mode instead of a geometry
+  swap, or a donor closer in size to your vehicle.
+
+KNOWN LIMITATIONS (beta)
+------------------------
+- Suspension geometry swaps between very different vehicles can still be unstable.
+- Leaf-spring suspensions: ride height / spring rate in the LOGIC mode may not change.
+- Parts with no nodes and no model of their own (decals...) can't be added.
+- Game updates may break parts of the mod; check for a new version.
