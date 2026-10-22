@@ -24,7 +24,7 @@ WHAT IT DOES
 
 INSTALL
 -------
-Put the zip into  Documents/BeamNG.drive/mods  (or %LOCALAPPDATA%/BeamNG/
+Download file from https://github.com/Kavencki/part-attacher/releases ,  Put the zip into  Documents/BeamNG.drive/mods  (or %LOCALAPPDATA%/BeamNG/
 BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 
 
