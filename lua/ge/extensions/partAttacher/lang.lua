@@ -1,0 +1,305 @@
+-- Part Attacher - mod author: Kavencki - Giedrius P. (c) 2026
+-- UI translations. The mod's UI is written in Lithuanian; this table gives the English text for each
+-- Lithuanian one (the key is the text exactly as it is shown). Keys with %s / %d / %.2f ... match
+-- formatted texts: the values in their place are kept (and translated too when they are UI words).
+-- The English text must keep the same placeholders in the same order.
+
+return {
+  en = {
+    -- window
+    ['Part Attacher %s (c) 2026 Kavencki. Visos teises saugomos.'] = 'Part Attacher %s (c) 2026 Kavencki. All rights reserved.',
+    ['Masina: %s'] = 'Vehicle: %s',
+    ['nera'] = 'none',
+    ['1. Pasirinkti detale'] = '1. Pick a part',
+    ['2. Pozicija ir tvirtinimas'] = '2. Position and mounting',
+    ['3. Idiegtos detales'] = '3. Installed parts',
+    ['4. Universalios pavaros (kardanas / diferencialai / pusasiai)'] = '4. Universal drivetrain (driveshaft / differentials / half shafts)',
+    ['5. Pakaba (logic): prosvaisa, spyruokles, amortizatoriai'] = '5. Suspension (logic): ride height, springs, dampers',
+    ['6. Saugos elektronika (ABS, TC, ESC, 2-step, line lock)'] = '6. Safety electronics (ABS, TC, ESC, 2-step, line lock)',
+
+    -- 1. pick a part
+    ['Mano masinos modelis'] = "My vehicle's model",
+    ['Modelis'] = 'Model',
+    ['pasirink modeli...'] = 'pick a model...',
+    ['Paieska'] = 'Search',
+    ['Ieskoti detales'] = 'Search parts',
+    ['Nieko nerasta.'] = 'Nothing found.',
+    ['... ir dar %d'] = '... and %d more',
+    ['%s: %d kategorijos, %d detales'] = '%s: %d categories, %d parts',
+    ['%s  (%d)'] = '%s  (%d)',
+    ['Kebulas (main)'] = 'Body (main)',
+    ['Kita (bendros / kitu masinu detales)'] = "Other (common / other vehicles' parts)",
+    ['Visos detales pagal tipa'] = 'All parts by type',
+    ['-- %s detales:'] = '-- %s parts:',
+    ['>> VARIKLIO SWAP (engine swap)'] = '>> ENGINE SWAP',
+    ['>> TURBO / KOMPRESORIUS (logic)'] = '>> TURBO / SUPERCHARGER (logic)',
+    ['Tavo variklis gauna sito turbo / kompresoriaus duomenis ir garsa, nustatymai - Tuning meniu.'] =
+      "Your engine gets this turbo / supercharger's data and sound; settings in the Tuning menu.",
+    ['PRITAIKYTI TURBO / KOMPRESORIU (logic): %s'] = 'APPLY TURBO / SUPERCHARGER (logic): %s',
+    ['Turbo + kompresorius'] = 'Turbo + supercharger',
+    ['Kompresorius'] = 'Supercharger',
+    ['%s (logic): %s (is %s)'] = '%s (logic): %s (from %s)',
+    ['Si detale neturi turbo / kompresoriaus duomenu.'] = 'This part has no turbo / supercharger data.',
+    ['%s: %s duomenys nepilni - neijungta, kad variklis veiktu.'] = '%s: the %s data is incomplete - left off so the engine still runs.',
+    ['%s (logic): %s ant variklio %s. Nustatymai (pvz. wastegate) - Tuning meniu.'] =
+      '%s (logic): %s on engine %s. Settings (e.g. wastegate) - Tuning menu.',
+    ['>> PRIEKINE PAKABA (front suspension swap)'] = '>> FRONT SUSPENSION SWAP',
+    ['>> GALINE PAKABA (rear suspension swap)'] = '>> REAR SUSPENSION SWAP',
+    ['>> PAVARU DEZES SWAP (gearbox swap)'] = '>> GEARBOX SWAP',
+    ['>> RADIATORIUS (ausinimas, logic)'] = '>> RADIATOR (cooling, logic)',
+    ['kW - bazine kreive, turbo / ECU / internals prideda daugiau'] = 'kW - base curve, turbo / ECU / internals add more',
+    ['Tavo radiatorius lieka, varikliui perkeliami sito ausinimo duomenys.'] = "Your radiator stays; the engine gets this one's cooling data.",
+    ['%s   [plotas %s, efekt. %s%s]'] = '%s   [area %s, eff. %s%s]',
+    ['Masinos spalva'] = 'Vehicle paint',
+    ['Tik modelis (be fizikos)'] = 'Model only (no physics)',
+    ['Tik modelis'] = 'Model only',
+    ['Su fizika'] = 'With physics',
+    ['Rezimas: TIK MODELIS - be fizikos, lenda kiaurai kliutis'] = 'Mode: MODEL ONLY - no physics, goes through obstacles',
+    ['Rezimas: su fizika (virtualus tvirtinimas)'] = 'Mode: with physics (virtual mount)',
+    ['Detale gauna savo fizika, svori ir susidurimus (virtualus tvirtinimas), toje pacioje vietoje.'] = 'The part gets its own physics, weight and collisions (virtual mount), in the same place.',
+    ['Lieka tik detales modelis, be fizikos (nesveria, nesimusa).'] = "Only the part's model stays, without physics (no weight, no collisions).",
+    ['%s: dabar su fizika (virtualus tvirtinimas).'] = '%s: now with physics (virtual mount).',
+    ['%s: dabar tik modelis (be fizikos).'] = '%s: now model only (no physics).',
+    ['Detale atsiras tik kaip modelis: nesveria, nesimusa, nelusta, tik juda kartu su masina. Detales be savo modelio tasku (radiatorius...) taip rodomos visada.'] =
+      'The part appears as its model only: no weight, no collisions, never breaks, it just moves with the vehicle. Parts without mesh points of their own (radiator...) always come like this.',
+    ['Auto vieta'] = 'Auto position',
+    ['Nauja detale atsiras ten, kur stovi tavo masinos tokia pati detale (buferis ant buferio, kapotas ant kapoto).'] =
+      "A new part appears where your vehicle's part of the same kind sits (bumper on bumper, hood on hood).",
+    ['Pastatyta ten, kur tavo masinos %s.'] = "Placed where your vehicle's %s is.",
+    ['Kaip mano masinos detale'] = "Like my vehicle's part",
+    ['Veidrodine kopija'] = 'Mirror copy',
+    ['Atsiras tokia pati detale kitoje masinos puseje (kaire <-> desine), veidrodiskai.'] =
+      'The same part appears on the other side of the vehicle (left <-> right), mirrored.',
+    ['Veidrodis'] = 'Mirror',
+    ['Tokia pati detale kitoje puseje: atsiras perziura, pastumdyk ir PRITVIRTINK.'] =
+      'The same part on the other side: a preview appears - adjust it and ATTACH.',
+    ['Veidrodine kopija: %s -> %s. Pastumdyk, jei reikia, ir PRITVIRTINK.'] = 'Mirror copy: %s -> %s. Adjust it if needed and ATTACH.',
+    ['Veidrodine kopija: %s (kitos puses detales nera - ta pati, pastatyta veidrodiskai). PRITVIRTINK.'] =
+      'Mirror copy: %s (no other-side part - the same one, placed mirrored). ATTACH it.',
+    ['%s SWAP - perziura: %s'] = '%s SWAP - preview: %s',
+    ['PRIDETI KAIP ANTRA GALINE ASI (6 ratai): %s'] = 'ADD AS A SECOND REAR AXLE (6 wheels): %s',
+    ['Tavo galine pakaba lieka, si atsiranda uz jos kaip antra asis (pvz. 6x4 sunkvezimis). Abi asys varomos universaliomis pavaromis.'] =
+      'Your rear suspension stays; this one comes behind it as a second axle (like a 6x4 truck). Both axles are driven by the universal drivetrain.',
+    ['ANTRA GALINE ASIS: bus prideta uz esamos galines pakabos (pastumk Y, kad stovetu kur reikia).'] =
+      'SECOND REAR AXLE: it will be added behind the current rear suspension (move Y to put it where you want).',
+    ['Antra galine asis varoma universaliomis pavaromis (%s).'] = 'The second rear axle is driven by the universal drivetrain (%s).',
+    ['%s: %s (is %s), prideta'] = '%s: %s (from %s), added',
+    ['Antra galine asis'] = 'Second rear axle',
+    ['ANTRA GALINE ASIS'] = 'SECOND REAR AXLE',
+    ['GEARBOX SWAP - perziura: %s'] = 'GEARBOX SWAP - preview: %s',
+    ['ENGINE SWAP - perziura: %s'] = 'ENGINE SWAP - preview: %s',
+    ['PRITAIKYTI RADIATORIU (logic): %s'] = 'APPLY RADIATOR (logic): %s',
+    ['Sukurti detale: %s'] = 'Spawn part: %s',
+    ['LOGIC (rekomenduojama): perkelti tik charakteri - %s'] = 'LOGIC (recommended): take over only the character - %s',
+    ['Tavo pakabos geometrija lieka, perkeliami donoro spyruokliu, amortizatoriu ir stabilizatoriaus standumai. Niekas nelus. Koreguok 5 dalyje.'] =
+      "Your suspension geometry stays; the donor's spring, damper and sway bar rates are taken over. Nothing breaks. Adjust in section 5.",
+    ['Zemiau - tikras geometrijos swap (eksperimentinis, gali glitchinti):'] = 'Below - a real geometry swap (experimental, may glitch):',
+
+    -- suspension names (also inside other texts)
+    ['Priekine pakaba'] = 'Front suspension',
+    ['Galine pakaba'] = 'Rear suspension',
+    ['priekine pakaba'] = 'front suspension',
+    ['galine pakaba'] = 'rear suspension',
+    ['PRIEKINE PAKABA'] = 'FRONT SUSPENSION',
+    ['GALINE PAKABA'] = 'REAR SUSPENSION',
+
+    -- 2. position and mounting
+    ['Sukurk detale 1 dalyje - ji atsiras virs masinos.'] = 'Spawn a part in section 1 - it appears above the vehicle.',
+    ['Detale: %s (%s) -> masina %s'] = 'Part: %s (%s) -> vehicle %s',
+    ['kraunama...'] = 'loading...',
+    ['Laikyti ore'] = 'Hold in the air',
+    ['Taikinys = dabartine masina'] = 'Target = current vehicle',
+    ['Taikinys pakeistas.'] = 'Target changed.',
+    ['Pozicija masinos atzvilgiu (-Y = pirmyn). Ctrl+click ant slankiklio = ivesti skaiciu'] =
+      'Position relative to the vehicle (-Y = forward). Ctrl+click on a slider = type a value',
+    ['+/- zingsnis (m)'] = '+/- step (m)',
+    ['X (sonas)'] = 'X (side)',
+    ['Y (pirmyn/atgal)'] = 'Y (forward / back)',
+    ['Z (aukstis)'] = 'Z (height)',
+    ['Pasvirimas (X)'] = 'Pitch (X)',
+    ['Pokrypis (Y)'] = 'Roll (Y)',
+    ['Pasukimas (Z)'] = 'Yaw (Z)',
+    ['Dydis (scale)'] = 'Size (scale)',
+    ['Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.'] = 'The part grows / shrinks around its centre (model and physics). The preview reloads when you let go of the slider.',
+    ['Tikras dydis'] = 'Real size',
+    ['Senojo variklio vieta'] = 'Old engine position',
+    ['Senosios pakabos vieta'] = 'Old suspension position',
+    ['Senosios dezes vieta'] = 'Old gearbox position',
+    ['Naujo variklio centras ten, kur buvo senojo'] = 'New engine centred where the old one was',
+    ['Donoro vieta'] = 'Donor position',
+    ['Detale ten, kur ji butu ant savo originalios masinos'] = 'The part where it would be on its original vehicle',
+    ['Ant stogo'] = 'On the roof',
+    ['ENGINE SWAP: senas variklis (%s) bus pakeistas siuo.'] = 'ENGINE SWAP: the old engine (%s) will be replaced by this one.',
+    ['LOGIC SWAP: tavo variklio fizika lieka (niekas nesulus), keiciasi galia, sukimo momentas,'] =
+      'LOGIC SWAP: your engine physics stay (nothing breaks); power, torque,',
+    ['apsukos, inercija, garsas. Tiuningas (ECU, internals, turbo...) - Parts meniu po varikliu.'] =
+      'revs, inertia and sound change. Tuning (ECU, internals, turbo...) - Parts menu under the engine.',
+    ['Pakeisti ir variklio modeli (matosi donoro variklis)'] = 'Also replace the engine model (the donor engine is shown)',
+    ['Stumdyk perziura, kad modelis tilptu i variklio skyriu. Isjungus - lieka tavo variklio modelis, keiciasi tik galia ir garsas.'] =
+      'Move the preview so the model fits the engine bay. Off - your engine model stays, only power and sound change.',
+    ['%s SWAP: %s bus pakeista sita.'] = '%s SWAP: %s will be replaced by this one.',
+    ['Kartu keliauja ratai, stebules, amortizatoriai, stabdziai, vairavimas.'] = 'Wheels, hubs, dampers, brakes and steering come along.',
+    ['Virinama tik per donoro tvirtinimo taskus - svirtys lieka judancios.'] = "Welded only through the donor's mount points - the arms keep moving.",
+    ['Jei ratai nebus varomi - ijungti universalias pavaras'] = "If the wheels won't be driven - enable the universal drivetrain",
+    ['Patikrinama, ar naujos pakabos velenai randa masinos pavaras. Jei ne - ijungiamos universalios pavaros pagal 4 dalies nustatymus.'] =
+      "Checks whether the new suspension's shafts find the vehicle's drivetrain. If not, the universal drivetrain is enabled with the section 4 settings.",
+    ['GEARBOX SWAP: dabartine deze (%s) bus pakeista sita.'] = 'GEARBOX SWAP: the current gearbox (%s) will be replaced by this one.',
+    ['Kartu ijungti universalias pavaras (4 dalis)'] = 'Also enable the universal drivetrain (section 4)',
+    ['Rekomenduojama: kardanas, diferencialai ir pusasiai sugeneruojami is naujo, kad galia tikrai pasiektu ratus.'] =
+      'Recommended: driveshaft, differentials and half shafts are rebuilt so the power really reaches the wheels.',
+    ['Tvirtinimas prie kebulo:'] = 'Mounting to the body:',
+    ['Tvirtinimas (detale taps masinos dalimi):'] = 'Mounting (the part becomes part of the vehicle):',
+    ['Suvirinimo tasku'] = 'Weld points',
+    ['Maks. tarpas (m)'] = 'Max gap (m)',
+    ['Stiprumas (N)'] = 'Strength (N)',
+    ['Vienos suvirinimo sijos jega, nuo kurios ji nutruksta; lankstytis pradeda nuo puses. Numatyta 40000 (BeamNG buferio tvirtinimas - 28000).'] =
+      "The force at which one weld beam breaks; it starts to bend at half of it. Default 40000 (BeamNG's own bumper mount: 28000).",
+    ['Nesulauzoma'] = 'Unbreakable',
+    ['Be susidurimu'] = 'No collisions',
+    ['Detale nesimus su kitomis masinomis (tik dekoracija)'] = "The part won't collide with other vehicles (decoration only)",
+    ['Apsauga nuo sudauzymo pirmas %.1f s'] = 'Crash protection for the first %.1f s',
+    ["Po spawn'o / R visos masinos sijos kelias sekundes nesilanksto ir nelusta, kol naujos detales nusistovi. Po to - iprasta zalos fizika."] =
+      'After a spawn / R no beam of the vehicle bends or breaks for a few seconds while the new parts settle. Then normal damage physics.',
+    ['ATLIKTI ENGINE SWAP'] = 'DO ENGINE SWAP',
+    ['ATLIKTI PAKABOS SWAP'] = 'DO SUSPENSION SWAP',
+    ['ATLIKTI GEARBOX SWAP'] = 'DO GEARBOX SWAP',
+    ['PRITVIRTINTI (idiegti i masina)'] = 'ATTACH (install on the vehicle)',
+    ['Virtualus tvirtinimas: detale laiko 8 remo taskai aplink ja, prie masinos strukturos'] = 'Virtual mount: 8 frame points around the part hold it, only they are welded to',
+    ['privirinami tik jie. Detale turi savo svori, fizika ir susidurimus.'] = "the vehicle's structure. The part keeps its weight, physics and collisions.",
+    ['Istrinti'] = 'Delete',
+
+    -- 3. installed parts
+    ['Variklis: %s (is %s), vietoj %s'] = 'Engine: %s (from %s), instead of %s',
+    ['Pavaru deze: %s (is %s), vietoj %s'] = 'Gearbox: %s (from %s), instead of %s',
+    ['Radiatorius (logic): %s (is %s)'] = 'Radiator (logic): %s (from %s)',
+    ['%s: %s (is %s), vietoj %s'] = '%s: %s (from %s), instead of %s',
+    ['%d. %s  (is %s)%s'] = '%d. %s  (from %s)%s',
+    ['  [tik modelis]'] = '  [model only]',
+    ['Perkelti'] = 'Move',
+    ['Nuimti'] = 'Remove',
+    ['Grazinti originalu'] = 'Restore original',
+    ['Grazinti originalia'] = 'Restore original',
+    ['PATAISYTI'] = 'FIX',
+    ['Grazina sena varikli ir vel leidzia nauja stumdyti'] = 'Puts the old engine back and lets you move the new one again',
+    ['Senos versijos swap (fiziskai istatytas svetimas variklis). Grazina originalu ir atidaro perziura - spausk ATLIKTI ENGINE SWAP, bus padaryta nauju logic budu.'] =
+      'Old version swap (a foreign engine physically installed). Restores the original and opens the preview - press DO ENGINE SWAP and it is redone the new logic way.',
+    ['Senos versijos swap: perdaro tvirtinima per donoro remo taskus (taiso vaira ir glitchus)'] =
+      'Old version swap: redoes the mounting through the donor frame points (fixes steering and glitches)',
+    ['Nuima detale ir vel leidzia ja stumdyti'] = 'Takes the part off and lets you move it again',
+    ['Si masina dar neturi pridetu detaliu.'] = 'This vehicle has no added parts yet.',
+
+    -- 4. universal drivetrain
+    ['Sugeneruoja kardana, diferencialus ir pusasius nuo BET KOKIOS pavaru dezes iki ratu.'] =
+      'Builds the driveshaft, differentials and half shafts from ANY gearbox to the wheels.',
+    ['Busena: %s'] = 'State: %s',
+    ['IJUNGTA (%s, %s, %.2f)'] = 'ON (%s, %s, %.2f)',
+    ['isjungta (originalios pavaros)'] = 'off (original drivetrain)',
+    ['Varomi ratai:'] = 'Driven wheels:',
+    ['Tilto diferencialas:'] = 'Axle differential:',
+    ['Centrinis diferencialas:'] = 'Center differential:',
+    ['Uzrakinami (locker):'] = 'Lockable (locker):',
+    ['Priekinis'] = 'Front',
+    ['Galinis'] = 'Rear',
+    ['Centrinis'] = 'Center',
+    ['Visi'] = 'All',
+    ['Uzrakinamas diferencialas turi 2 rezimus: pasirinktas tipas ir "locked" (abi puses sukasi vienodai). Perjungiama vaziuojant - mygtukais zemiau arba zaidimo klavisu "Toggle differential mode".'] =
+      'A lockable differential has 2 modes: the chosen type and "locked" (both sides turn alike). Switch them while driving - with the buttons below or the game\'s "Toggle differential mode" key.',
+    ['Perjungti vaziuojant:'] = 'Switch while driving:',
+    ['Visi diferencialai'] = 'All differentials',
+    ['Centrinis (abu tiltai kartu)'] = 'Center (both axles together)',
+    ['   4WD rezime abu tiltai sujungti ir sukasi kartu (centrinio uzrakto nereikia).'] =
+      '   In 4WD both axles are locked together and turn alike (no center lock needed).',
+    ['UZRAKINTI VISKA'] = 'LOCK EVERYTHING',
+    ['ATRAKINTI VISKA'] = 'UNLOCK EVERYTHING',
+    ['Visi uzrakinami diferencialai - locked, skirstymo deze - 4WD: abu tiltai ir abi kiekvieno tilto puses sukasi kartu.'] =
+      'All lockable differentials locked, the transfer case in 4WD: both axles and both sides of each axle turn together.',
+    ['Perjungiamas 2WD / 4WD (part-time)'] = 'Switchable 2WD / 4WD (part-time)',
+    ['Vietoj centrinio diferencialo - skirstymo deze kaip visureigiuose: 2WD (galas) arba 4WD (priekis ir galas sujungti 50 / 50). Perjungiama vaziuojant. Ant sauso asfalto 4WD posukiuose "stringa" - kaip tikroje masinoje.'] =
+      'Instead of a center differential - a transfer case like on off-roaders: 2WD (rear) or 4WD (front and rear locked 50 / 50). Switch while driving. On dry tarmac 4WD binds up in turns - like a real car.',
+    ['Zemoji pavara (low range)'] = 'Low range',
+    ['Papildoma deze po pavaru deze: High (1:1) arba Low - letai, bet labai stipriai (bekelei, kopimui). Perjungiama vaziuojant.'] =
+      'An extra box after the gearbox: High (1:1) or Low - slow but very strong (off-road, climbing). Switch while driving.',
+    ['Zemosios santykis'] = 'Low range ratio',
+    ['Priekio dalis (AWD)'] = 'Front share (AWD)',
+    ['Galutine pavara'] = 'Final drive',
+    ['Didesnis skaicius = greitesnis isibegejimas, mazesnis max greitis. Ctrl+click - ivesti'] =
+      'Higher number = faster acceleration, lower top speed. Ctrl+click - type a value',
+    ['Nuskaityti dabartine galutine pavara'] = 'Read the current final drive',
+    ['Dabartine galutine pavara: %.2f'] = 'Current final drive: %.2f',
+    ['Nepavyko nuskaityti.'] = 'Could not read it.',
+    ['Atnaujinti pavaras'] = 'Update drivetrain',
+    ['IJUNGTI universalias pavaras'] = 'ENABLE universal drivetrain',
+    ['Isjungti (originalios)'] = 'Disable (original)',
+
+    -- 5. suspension (logic)
+    ['Tavo pakabos geometrija ir fizika lieka - keiciasi tik jos charakteris. Niekas nelus.'] =
+      'Your suspension geometry and physics stay - only its character changes. Nothing breaks.',
+    ['Donoro charakteri pasirink 1 dalyje: pakabu aplankas -> "LOGIC: perkelti tik charakteri".'] =
+      'Pick the donor character in section 1: suspension folder -> "LOGIC: take over only the character".',
+    ['PRIEKIS'] = 'FRONT',
+    ['GALAS'] = 'REAR',
+    ['  donoro charakteris: %s (%s)'] = '  donor character: %s (%s)',
+    ['pamirsti'] = 'forget',
+    ['Prosvaisa (cm)'] = 'Ride height (cm)',
+    ['Spyruokles x'] = 'Springs x',
+    ['Amortizatoriai x'] = 'Dampers x',
+    ['Stabilizatorius x'] = 'Sway bar x',
+    ['PRITAIKYTI PAKABA'] = 'APPLY SUSPENSION',
+    ['Atstatyti originalia'] = 'Reset to original',
+    ['Busena: pritaikyta (logic).'] = 'State: applied (logic).',
+
+    -- messages
+    ['Nerasti masinos duomenys.'] = 'Vehicle data not found.',
+    ['Nerasta masinos detale, kuria butu galima pakeisti.'] = 'No part of this vehicle that could be replaced was found.',
+    ['Nerasta masinos %s, kuria butu galima pakeisti.'] = 'No %s found on this vehicle that could be replaced.',
+    ['Naujos pakabos velenai iesko "%s" - ijungiamos universalios pavaros (%s).'] =
+      'The new suspension\'s shafts look for "%s" - the universal drivetrain is enabled (%s).',
+    ['%s: %s -> %s (virtualus remas: %d tasku + %d donoro remo tasku)'] = '%s: %s -> %s (virtual frame: %d points + %d donor frame points)',
+    ['%s pataisyta: virtualus remas %d tasku + %d donoro remo tasku.'] = '%s fixed: virtual frame %d points + %d donor frame points.',
+    ['Si masina neturi vidaus degimo variklio, kuri butu galima pakeisti.'] = 'This vehicle has no combustion engine that could be replaced.',
+    ['Engine swap: %s -> %s (~%d kW bazine kreive)'] = 'Engine swap: %s -> %s (~%d kW base curve)',
+    ['Variklio swap pataisytas: %d tasku prisegta, %d atsinesta.'] = 'Engine swap fixed: %d points hooked on, %d brought along.',
+    ['Nerasta masinos pavaru deze, kuria butu galima pakeisti.'] = 'No gearbox found on this vehicle that could be replaced.',
+    ['Nerasta detale arba masina.'] = 'Part or vehicle not found.',
+    ['Per toli nuo masinos: artimiausias tarpas %.2f m (leidziama %.2f m). Priartink detale arba padidink "Maks. tarpas".'] =
+      'Too far from the vehicle: nearest gap %.2f m (allowed %.2f m). Move the part closer or raise "Max gap".',
+    ['Detale %s idiegta i masina (%d tasku arti kebulo).'] = 'Part %s installed on the vehicle (%d points near the body).',
+    ['Nepavyko nuskaityti masinos mazgu (nodes).'] = "Could not read the vehicle's nodes.",
+    ['Si detale neturi savo mazgu (nodes) - ji tik vizuali ir negali buti atskira. Pasirink kita.'] =
+      'This part has no nodes of its own - it is visual only and cannot stand alone. Pick another one.',
+    ['Detale nepasikrove.'] = 'The part did not load.',
+    ['Isek i masina.'] = 'Get into a vehicle.',
+    ['Pirma isek i masina, ant kurios desi detale.'] = 'First get into the vehicle you want to put the part on.',
+    ['Pasirink detale sarase.'] = 'Pick a part in the list.',
+    ['Si detale neturi ausinimo duomenu.'] = 'This part has no cooling data.',
+    ['Si masina neturi vidaus degimo variklio, kuri butu galima ausinti.'] = 'This vehicle has no combustion engine to cool.',
+    ['Radiatorius %s: plotas %s -> %s, efektyvumas %s -> %s%s'] = 'Radiator %s: area %s -> %s, effectiveness %s -> %s%s',
+    [' (sio variklio temperatura neskaiciuojama - poveikio nebus)'] = ' (this engine has no temperature simulation - no effect)',
+    ['Radiatorius: rodomas tik jo modelis (be fizikos). Kad ausintu, rinkis ji aplanke ">> RADIATORIUS (ausinimas, logic)".'] =
+      'Radiator: only its model is shown (no physics). For cooling, pick it in the ">> RADIATOR (cooling, logic)" folder.',
+    ['Detale %s neturi savo modelio tasku (modelis kabo ant savo masinos kebulo) - atsiras tik jos modelis, be fizikos.'] =
+      "Part %s has no mesh points of its own (its model hangs on its own car's body) - only its model will appear, without physics.",
+    ['Si detale neturi modelio (tik duomenys) - nera ka parodyti.'] = 'This part has no model (data only) - nothing to show.',
+    ['Pakabos nustatymai pritaikyti (logic).'] = 'Suspension settings applied (logic).',
+    ['Pakaba grazinta i originalia.'] = 'Suspension restored to original.',
+    ['Nepavyko nuskaityti sios pakabos spyruokliu / amortizatoriu.'] = 'Could not read the springs / dampers of this suspension.',
+    ['%s charakteris: spyruokles %s N/m, slopinimas %s, stabilizatorius %s'] = '%s character: springs %s N/m, damping %s, sway bar %s',
+
+    -- 6. safety electronics
+    ['Prideda elektronika bet kuriai masinai (ko masina jau turi pati - nekeiciama).'] = 'Adds electronics to any vehicle (what the vehicle already has stays as it is).',
+    ['Busena: idiegta - %s'] = 'State: installed - %s',
+    ['Busena: neidiegta'] = 'State: not installed',
+    ['ABS (stabdziai neuzsiblokuoja)'] = 'ABS (the brakes never lock up)',
+    ['Traction control (TC) - ratai nebuksuoja'] = 'Traction control (TC) - no wheelspin',
+    ['Stabilumo kontrole (ESC) - neslysta / nesisuka'] = 'Stability control (ESC) - no sliding / spinning out',
+    ['Bendri nustatymai, ne pagal sia masina: ant labai neiprastu masinu gali veikti netiksliai.'] = 'Generic settings, not tuned for this vehicle: on very unusual vehicles it may be imprecise.',
+    ['Line lock (laiko priekinius stabdzius - burnout)'] = 'Line lock (holds the front brakes - burnout)',
+    ['IDIEGTI / ATNAUJINTI'] = 'INSTALL / UPDATE',
+    ['Pasalinti'] = 'Remove',
+    ['Nieko nepasirinkta.'] = 'Nothing selected.',
+    ['Saugos elektronika idiegta. Rezimai - radialiniame meniu (Vehicle features) arba Options > Controls.'] = 'Safety electronics installed. Modes: radial menu (Vehicle features) or Options > Controls.',
+    ['Vaziuojant: TC / ESC rezimai (ESC + TC / TC / Off) - klavisas "Toggle ESC mode" arba radialinis meniu.'] = 'While driving: TC / ESC modes (ESC + TC / TC / Off) - key "Toggle ESC mode" or the radial menu.',
+    ['2-step: stovint laikyk stabdi + pilna gaza, atleisk stabdi - startas. Ijungiama meniu / "Toggle Two-Step".'] = '2-step: standing still, hold the brake + full throttle, let go of the brake - launch. Switch it on in the menu / "Toggle Two-Step".',
+    ['Line lock: laikyk stabdi, ijunk "Toggle Line Lock" - priekiniai laikomi, galiniai buksuoja.'] = 'Line lock: hold the brake, press "Toggle Line Lock" - the front wheels are held, the rear ones spin.',
+  },
+}
