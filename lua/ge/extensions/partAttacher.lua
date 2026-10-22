@@ -47,7 +47,7 @@ end
 -- UI words themselves). ImGui "##id" endings stay as they are. Results are cached.
 --------------------------------------------------------------------------------
 
-S.version = 'v1.0 beta'
+S.version = 'v1.0 beta MP test'
 S.settingsFile = '/settings/partAttacher/settings.json'
 S.lang = 'en' -- English by default
 pcall(function()
@@ -6139,13 +6139,58 @@ local function toggleWindow()
   log('I', logTag, 'window ' .. (showWindow[0] and 'opened' or 'closed'))
 end
 
+--------------------------------------------------------------------------------
+-- multiplayer (BeamMP): a preview is a vehicle of its own, so BeamMP sends it to every other
+-- player, whose game spawns it with the game's safe spawn. That places a car by the box of its
+-- colliding nodes, and a preview has none (it collides with nothing): spawn.spawnVehicle returns
+-- nil and BeamMP's spawn queue errors out on it (MPVehicleGE.lua:1538). A preview is spawned
+-- where it is sent instead, as its owner spawns it.
+--------------------------------------------------------------------------------
+
+S.isPreviewConfig = function(cfg)
+  if type(cfg) == 'string' then
+    return cfg:find('partAttacher', 1, true) ~= nil and cfg:find('["ghost"]=true', 1, true) ~= nil
+  end
+  return type(cfg) == 'table' and type(cfg.partAttacher) == 'table' and cfg.partAttacher.ghost == true
+end
+
+S.installSpawnHook = function()
+  local sp = rawget(_G, 'spawn')
+  if type(sp) ~= 'table' or type(sp.spawnVehicle) ~= 'function' or S.origSpawnVehicle then return end
+  S.origSpawnVehicle, S.origSetVehicleObject = sp.spawnVehicle, sp.setVehicleObject
+  sp.spawnVehicle = function(model, partConfig, pos, rot, options)
+    if S.isPreviewConfig(partConfig) then
+      options = options or {}
+      options.safeSpawn = false
+    end
+    return S.origSpawnVehicle(model, partConfig, pos, rot, options)
+  end
+  if type(S.origSetVehicleObject) == 'function' then
+    sp.setVehicleObject = function(veh, options)
+      if type(options) == 'table' and S.isPreviewConfig(options.config) then options.safeSpawn = false end
+      return S.origSetVehicleObject(veh, options)
+    end
+  end
+end
+
+S.removeSpawnHook = function()
+  local sp = rawget(_G, 'spawn')
+  if type(sp) == 'table' and S.origSpawnVehicle then
+    sp.spawnVehicle = S.origSpawnVehicle
+    if S.origSetVehicleObject then sp.setVehicleObject = S.origSetVehicleObject end
+  end
+  S.origSpawnVehicle, S.origSetVehicleObject = nil, nil
+end
+
 local function onExtensionLoaded()
   installLoaderHooks()
+  S.installSpawnHook()
   log('I', logTag, 'Part Attacher ' .. S.version .. ' by Kavencki - Giedrius P. loaded. Ctrl+Shift+Y or partAttacher.toggleWindow()')
 end
 
 local function onExtensionUnloaded()
   removeLoaderHooks()
+  S.removeSpawnHook()
   for _, e in pairs(entries) do
     local ghost = getVeh(e.id)
     if ghost then ghost:delete() end
