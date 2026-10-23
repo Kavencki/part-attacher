@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.0 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.1 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -30,6 +30,10 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 
 QUICK START
 -----------
+The window's sections are tabs at its top: Part (sections 1 and 2), Installed
+(3), Drivetrain (4), Suspension (5), Electronics (6). When a preview appears,
+its position (section 2) shows on top of the same Part tab - no other tab needed.
+
 1. Get into the vehicle you want to modify.
 2. Press  Ctrl + Shift + Y  to open the window (rebind it in Options > Controls >
    Gameplay > "Part Attacher: open / close window"), or press ESC and pick
@@ -58,6 +62,12 @@ SECTION 1 - PICK A PART
 - "Vehicle paint": paint the part in your vehicle's colours.
 - "All parts by type" at the bottom: every part, including common ones and
   other vehicles' parts.
+- Data-only parts (no model and no points of their own, e.g. a truck's "Air
+  Compressor") have no preview: the button puts them straight onto your vehicle.
+  Their devices are connected to your engine (it gets the outputs they need).
+  Section 3 marks them "[data only]"; they can only be removed. A compressor
+  needs an air tank too - add the same vehicle's "Air Tanks", otherwise a
+  message says what is missing.
 
 
 SECTION 2 - POSITION AND MOUNTING
@@ -80,6 +90,12 @@ SECTION 2 - POSITION AND MOUNTING
   body, spread out, sized to the node masses). The part keeps its own weight,
   beams and collisions - a bull bar works as a bull bar. Its links to the
   donor car's body (frame, bumper) are left out, so they can't grab your car.
+- A part far from the car's own body (a fifth wheel on the frame of a swapped
+  semi axle) also hangs on the swapped suspension's frame (its virtual frame,
+  the donor frame it brought) and on parts you added before with physics - the
+  car's body always comes first when it is in reach. Never on the moving parts
+  of a suspension (axles, arms, wheels). If a part reaches nothing at all, a
+  message says it will fall.
 - Weld points (welds per frame point = weld points / 3), Max gap (the frame
   reaches 3x as far, at least 1 m), Strength / Unbreakable, No collisions.
   Strength is per weld beam: it breaks at that force and starts to bend at
@@ -87,6 +103,19 @@ SECTION 2 - POSITION AND MOUNTING
 - "Crash protection for the first 2.5 s": after a spawn / reset nothing bends
   or breaks for 2.5 s while new parts settle, then normal damage returns.
 
+
+HITCHES (fifth wheel, pintle, tow hitch)
+----------------------------------------
+- An attached hitch works like on its own vehicle: the semi's "Fifth Wheel"
+  (us_semi) takes a semi trailer when you back under it, a "Pintle Hitch" and
+  other hitches couple with the game's coupler key (L). Unhitch with the fifth
+  wheel's handle or the radial menu.
+- A hitch hangs on its virtual mount at its own mount points only (its rails,
+  its frame points), so the fifth wheel plate tilts and slides like on the donor.
+  last_load.log says "hitch fifthwheel_v2, held at its N mount points".
+- A hitch only works with physics: a "Model only" part has no coupler point.
+- A heavy trailer pulls through the hitch's welds: if it tears off, raise
+  "Strength" in section 2 or tick "Unbreakable".
 
 ENGINE SWAP  (folder ">> ENGINE SWAP")
 -----------
