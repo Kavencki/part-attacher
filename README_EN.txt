@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.1 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.2 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -18,6 +18,9 @@ WHAT IT DOES
   part size (scale).
 - SAFETY ELECTRONICS on any vehicle: ABS, traction control, stability control,
   2-step launch control, line lock.
+- FRONT END SWAP: another vehicle's whole front (bumper, fenders, hood, lights,
+  grille) on yours in one go.
+- Works in multiplayer (BeamMP).
 - Everything is saved with the game's own vehicle save and loads on any map.
 - English and Lithuanian UI.
 
@@ -31,8 +34,9 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 QUICK START
 -----------
 The window's sections are tabs at its top: Part (sections 1 and 2), Installed
-(3), Drivetrain (4), Suspension (5), Electronics (6). When a preview appears,
-its position (section 2) shows on top of the same Part tab - no other tab needed.
+(3), Drivetrain (4), Suspension (5), Electronics (6), Front end (7). When a
+preview appears, its position (section 2) shows on top of the same Part tab -
+no other tab needed.
 
 1. Get into the vehicle you want to modify.
 2. Press  Ctrl + Shift + Y  to open the window (rebind it in Options > Controls >
@@ -183,6 +187,25 @@ shafts) is rebuilt from the real wheel positions:
   driveshaft model is drawn.
 
 
+SECTION 7 - FRONT END SWAP
+--------------------------
+Put the whole front of another vehicle on yours:
+- Pick the donor in "Vehicle (donor)". Its front end parts are listed from its
+  default parts (front bumper, bumper support, fenders, hood, headlights, grille,
+  fog lights, front fascia, radiator support...) - untick what you don't want.
+- "SPAWN FRONT END": all of them appear as ONE preview, each where it sits on
+  its own car, with its own lights and sub parts. It starts centred on your car,
+  its front at your car's front and, with "Auto size", as wide as your car's
+  front. Move it and set its size in the Part tab, then ATTACH.
+- It is installed as one part on one virtual mount. "Take my vehicle's own front
+  parts off" (on by default) empties your bumper, fender, hood, headlight and
+  grille slots, like the Parts menu; removing the front end in the Installed tab
+  puts them back. "Move" turns it back into a preview.
+- It takes damage like on its own car: the mount holds only the points where
+  its parts were bolted to the donor's body, so the bumper, fenders and hood
+  bend and break in a crash. "Strength" in section 2 sets how hard it holds on.
+
+
 SAVING YOUR VEHICLE
 -------------------
 Use the game's own save (Vehicle Config > Save): everything the mod did -
@@ -205,6 +228,18 @@ While driving: TC / ESC modes (ESC + TC / TC / Off), 2-step and line lock are
 switched in the radial menu (Vehicle features) or with the Options > Controls
 keys "Toggle ESC mode", "Toggle Two-Step", "Toggle Line Lock". What the vehicle
 already has of its own (its ESC / TC, 2-step) stays as it is.
+
+
+MULTIPLAYER (BeamMP)
+--------------------
+- Put the mod zip in the server's Resources/Client folder: every player gets it
+  from there.
+- In ServerConfig.toml set MaxCars = 2 or more: a part preview is a vehicle of
+  its own while you place it.
+- Other players see your previews and your finished car (parts, swaps,
+  drivetrain) like any edited vehicle.
+- Before joining, disable your own local copy of Part Attacher in the Mod
+  Manager if you have one (the server's copy has the same files).
 
 
 LANGUAGE

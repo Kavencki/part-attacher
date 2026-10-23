@@ -47,7 +47,7 @@ end
 -- UI words themselves). ImGui "##id" endings stay as they are. Results are cached.
 --------------------------------------------------------------------------------
 
-S.version = 'v1.1 beta'
+S.version = 'v1.2 beta'
 S.settingsFile = '/settings/partAttacher/settings.json'
 S.lang = 'en' -- English by default
 pcall(function()
@@ -1112,8 +1112,39 @@ S.extraScale = function(ex)
   return {s, ex.pivot[1], ex.pivot[2], ex.pivot[3]}
 end
 
+-- front end swap: a made-up part holding another car's front parts (bumper, fenders, hood, lights...)
+-- in its slots, each at the place it has on its own car (the offsets its slots there add up to). As
+-- a preview it is the main part; installed it sits in an extra slot, so its parts come as sub parts
+-- of that extra (one virtual mount for the whole front end).
+S.buildFrontEndPart = function(ioCtx, name, spec)
+  local slots, filename = {}, nil
+  for i, p in ipairs(type(spec) == 'table' and type(spec.parts) == 'table' and spec.parts or {}) do
+    local okP, part, file = pcall(origGetPart, ioCtx, p.name)
+    if okP and type(part) == 'table' then
+      filename = filename or file
+      local st = part.slotType
+      local slot = {
+        name = 'upa_fe_' .. i,
+        allowTypes = type(st) == 'table' and deepcopy(st) or {tostring(st or p.name)},
+        denyTypes = {},
+        default = p.name,
+        description = 'Part Attacher front end: ' .. tostring(p.name),
+      }
+      local o = type(p.offset) == 'table' and p.offset or {}
+      if (tonumber(o[1]) or 0) ~= 0 or (tonumber(o[2]) or 0) ~= 0 or (tonumber(o[3]) or 0) ~= 0 then
+        slot.nodeOffset = {x = tonumber(o[1]) or 0, y = tonumber(o[2]) or 0, z = tonumber(o[3]) or 0}
+      end
+      slots[#slots + 1] = slot
+    end
+  end
+  return {partName = name, slotType = 'main', information = {name = 'Front end', authors = 'Part Attacher'}, slots2 = slots}, filename
+end
+
 local function wrappedGetPart(ioCtx, partName)
   local ctx = injectCtx
+  -- a front end preview's made-up main part (S.loadFrontEnds, set by wrappedFindParts)
+  local frontEnd = type(S.loadFrontEnds) == 'table' and S.loadFrontEnds[partName]
+  if frontEnd then return S.buildFrontEndPart(ioCtx, partName, frontEnd) end
   -- preview of a scaled part: every part of it, as it would load otherwise, grown / shrunk
   if ctx and ctx.ghostScale and not ctx.scaleBusy then
     ctx.scaleBusy = true
@@ -1164,7 +1195,9 @@ local function wrappedGetPart(ioCtx, partName)
       -- donor part behind the alias of extra slot #idx (only its model for a mesh only extra)
       local ex = ctx.extras[idx]
       local part, filename
-      if ex.meshOnly then
+      if type(ex.frontEnd) == 'table' then
+        part, filename = S.buildFrontEndPart(ioCtx, ex.part, ex.frontEnd)
+      elseif ex.meshOnly then
         part, filename = S.buildMeshOnlyPart(ioCtx, ex.part, ex.meshNodes)
       else
         part, filename = origGetPart(ioCtx, ex.part)
@@ -1231,12 +1264,20 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   local pa = type(vehicleConfig) == 'table' and type(vehicleConfig.partAttacher) == 'table' and vehicleConfig.partAttacher
   -- a modded car starts loading: collect the mod's log lines for last_load.log
   S.diag = (pa and not pa.ghost) and {string.format('=== %s  %s', os.date('%Y-%m-%d %H:%M:%S'), tostring(vehicleConfig.mainPartName or (vehicleConfig.partsTree and vehicleConfig.partsTree.chosenPartName) or '?'))} or nil
+  -- a front end preview: its made-up main part, and the real parts in it for their mesh folders
+  S.loadFrontEnds = {}
+  local previewParts = {type(vehicleConfig) == 'table' and vehicleConfig.mainPartName or nil}
+  if pa and pa.ghost and type(pa.frontEnd) == 'table' and type(vehicleConfig.mainPartName) == 'string' then
+    S.loadFrontEnds[vehicleConfig.mainPartName] = pa.frontEnd
+    previewParts = {}
+    for _, p in ipairs(type(pa.frontEnd.parts) == 'table' and pa.frontEnd.parts or {}) do previewParts[#previewParts + 1] = p.name end
+  end
   local extras = pa and type(pa.extraParts) == 'table' and pa.extraParts or {}
   -- a preview of a shared (common) part: its model's folder for meshes and materials
   if pa and pa.ghost and type(ioCtx) == 'table' and type(ioCtx.preloadedDirs) == 'table' and vehicleConfig.mainPartName then
     local have, more = {}, false
     for _, d in ipairs(ioCtx.preloadedDirs) do have[d] = true end
-    for _, d in ipairs(S.commonMeshDirs(ioCtx, {vehicleConfig.mainPartName})) do
+    for _, d in ipairs(S.commonMeshDirs(ioCtx, previewParts)) do
       if not have[d] and FS:directoryExists(d) then
         table.insert(ioCtx.preloadedDirs, d)
         have[d] = true
@@ -1294,7 +1335,13 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   if added then jbeamIO.startLoading(dirs) end
   -- the model folders of shared (common) donor parts too, for their meshes and materials
   local donorParts = {}
-  for _, ex in ipairs(extras) do donorParts[#donorParts + 1] = ex.part end
+  for _, ex in ipairs(extras) do
+    if type(ex.frontEnd) == 'table' then
+      for _, p in ipairs(type(ex.frontEnd.parts) == 'table' and ex.frontEnd.parts or {}) do donorParts[#donorParts + 1] = p.name end
+    else
+      donorParts[#donorParts + 1] = ex.part
+    end
+  end
   if swap then donorParts[#donorParts + 1] = swap.part end
   if gbSwap then donorParts[#donorParts + 1] = gbSwap.part end
   for _, spec in pairs(partSwaps or {}) do donorParts[#donorParts + 1] = spec.part end
@@ -2934,7 +2981,8 @@ local function respawnWithConfig(target, mutate)
   return true
 end
 
-local function respawnWithExtras(target, extras)
+-- also(cfg): more changes to the config in the same respawn (a front end empties the car's own front slots)
+local function respawnWithExtras(target, extras, also)
   return respawnWithConfig(target, function(cfg)
     cfg.partAttacher.extraParts = extras
     -- forget old choices of our slots, the indices may have shifted
@@ -2948,6 +2996,7 @@ local function respawnWithExtras(target, extras)
         if type(slotId) == 'string' and slotId:find(extraSlotPrefix, 1, true) then cfg.parts[slotId] = nil end
       end
     end
+    if also then also(cfg) end
   end)
 end
 
@@ -3910,6 +3959,16 @@ local function mergeIntoTarget(e)
 
   local off = offsetVec(e)
   local extras = deepcopy(getExtras(e.targetId))
+  -- a front end: the car's own front parts come off (kept in the extra, back when it is removed)
+  local frontEnd = e.frontEnd and deepcopy(e.frontEnd) or nil
+  local replaced
+  if frontEnd then
+    frontEnd.replaced = nil
+    if frontEnd.removeOwn then
+      replaced = S.targetFrontParts(target)
+      frontEnd.replaced = #replaced > 0 and replaced or nil
+    end
+  end
   table.insert(extras, {
     model = e.model,
     part = e.partName,
@@ -3923,19 +3982,28 @@ local function mergeIntoTarget(e)
     noCollision = S.noCollisionPtr[0] or nil,
     meshOnly = meshOnly or nil,
     meshNodes = meshOnly and e.meshNodes or nil,
+    frontEnd = frontEnd,
   })
 
   deleteEntry(e)
-  if respawnWithExtras(target, extras) then
-    msg(string.format('Detale %s idiegta i masina (%d tasku arti kebulo).', e.partName, inReach), 5)
+  local also = replaced and #replaced > 0 and function(cfg) S.setTreeParts(cfg, replaced, '') end or nil
+  if respawnWithExtras(target, extras, also) then
+    if frontEnd then
+      msg(string.format('Priekis is %s idiegtas (%d detales, %d savu nuimta).', tostring(e.model), #frontEnd.parts, replaced and #replaced or 0), 6)
+    else
+      msg(string.format('Detale %s idiegta i masina (%d tasku arti kebulo).', e.partName, inReach), 5)
+    end
   end
 end
 
 local function removeExtra(target, index)
   local extras = deepcopy(getExtras(target:getID()))
-  if not extras[index] then return end
+  local ex = extras[index]
+  if not ex then return end
   table.remove(extras, index)
-  respawnWithExtras(target, extras)
+  -- a front end gives the car its own front parts back
+  local back = type(ex.frontEnd) == 'table' and type(ex.frontEnd.replaced) == 'table' and ex.frontEnd.replaced or nil
+  respawnWithExtras(target, extras, back and function(cfg) S.setTreeParts(cfg, back, nil) end or nil)
 end
 
 --------------------------------------------------------------------------------
@@ -3965,6 +4033,7 @@ local function registerEntry(id, partName, model, target, preset)
     off = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
     rot = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
     -- size: the slider, and the factor the preview was built with (only that one gets attached)
+    frontEnd = preset and type(preset.frontEnd) == 'table' and preset.frontEnd or nil,
     builtScale = preset and S.extraScale(preset) and tonumber(preset.scale) or 1,
   }
   e.scale = im.FloatPtr(e.builtScale)
@@ -3986,7 +4055,9 @@ end
 
 local function spawnGhost(model, partName, target, preset)
   -- a suspension alone has nothing to hang on (its frame is not there): the preview gets glued rigid
-  local config = {mainPartName = partName, partAttacher = {ghost = true, model = model, rigid = type(preset) == 'table' and preset.mode == 'partswap'}}
+  -- (a front end too: its pieces - bumper, fenders, hood - would fall apart)
+  local frontEnd = type(preset) == 'table' and type(preset.frontEnd) == 'table' and preset.frontEnd or nil
+  local config = {mainPartName = partName, partAttacher = {ghost = true, model = model, rigid = (type(preset) == 'table' and preset.mode == 'partswap') or frontEnd ~= nil, frontEnd = frontEnd}}
   if type(preset) == 'table' and preset.mode == 'meshonly' then config.partAttacher.meshOnly = {nodes = preset.meshNodes} end
   -- a scaled part: the preview is built at that size (around the pivot the part keeps)
   config.partAttacher.scale = type(preset) == 'table' and S.extraScale(preset) or nil
@@ -4688,6 +4759,198 @@ S.setExtraPhysics = function(target, index, physics)
   end
 end
 
+--------------------------------------------------------------------------------
+-- front end swap (section 7): another car's whole front - bumper, fenders, hood, lights, grille -
+-- as one preview, placed and sized like any part, installed as one part on one virtual mount
+--------------------------------------------------------------------------------
+
+-- a front end part by its slot / name (bumper_F is the front bumper, bumper_R the rear one; fender_R
+-- is the right fender). Doors, mirrors, suspension and engine parts are never front end parts.
+S.frontWords = {'bumper_f', 'bumperbar_f', 'bumper_front', 'front_bumper', 'fender', 'hood', 'bonnet',
+  'headlight', 'grille', 'grill', 'foglight', 'fog_light', 'splitter', 'front_lip', 'lip_f', 'nose',
+  'radsupport', 'radiator_support', 'license_plate_f', 'licenseplate_f', 'fascia_f', 'front_fascia'}
+S.notFrontWords = {'rear', 'bumper_r', 'bumperbar_r', 'fender_rl', 'fender_rr', 'engine', 'suspension', 'steer',
+  'brake', 'hub', 'wheel', 'tire', 'axle', 'coilover', 'shock', 'strut', 'sway', 'door', 'seat', 'interior',
+  'dash', 'mirror', 'trunk', 'tailgate', 'radiator_', 'turbo', 'intercooler', 'intake', 'exhaust'}
+
+S.isFrontPart = function(slotName, partName)
+  local s = (tostring(slotName) .. ' ' .. tostring(partName)):lower()
+  for _, w in ipairs(S.notFrontWords) do
+    if s:find(w, 1, true) then return false end
+  end
+  for _, w in ipairs(S.frontWords) do
+    if s:find(w, 1, true) then return true end
+  end
+  return false
+end
+
+S.slotOffset = function(s)
+  local function num(v) return tonumber(v) or 0 end
+  local o = type(s.nodeOffset) == 'table' and s.nodeOffset or {}
+  local m = type(s.nodeMove) == 'table' and s.nodeMove or {}
+  return num(o.x) + num(m.x), num(o.y) + num(m.y), num(o.z) + num(m.z)
+end
+
+-- the donor's front end parts in its default part tree: {name, slot, desc, offset (the move its
+-- slots there add up to)}; below a front end part nothing more is picked (its sub parts come with it)
+S.findFrontParts = function(model)
+  local okCtx, ioCtx = pcall(jbeamIO.startLoading, modelDirs(model))
+  if not okCtx then return {} end
+  local okMain, main = pcall(jbeamIO.getMainPartName, ioCtx)
+  if not okMain or type(main) ~= 'string' then return {} end
+  local found, visited = {}, {}
+  local function walk(name, depth, ox, oy, oz)
+    if depth > 8 or visited[name] then return end
+    visited[name] = true
+    local okP, part = pcall(origGetPart, ioCtx, name)
+    if not okP or type(part) ~= 'table' then return end
+    for _, s in ipairs(part.slots2 or part.slots or {}) do
+      local child = type(s) == 'table' and s.default
+      if type(child) == 'string' and child ~= '' then
+        local dx, dy, dz = S.slotOffset(s)
+        if S.isFrontPart(s.name, child) then
+          local desc = type(s.description) == 'string' and s.description ~= '' and s.description or tostring(s.name)
+          found[#found + 1] = {name = child, slot = s.name, desc = desc, offset = {ox + dx, oy + dy, oz + dz}}
+        else
+          walk(child, depth + 1, ox + dx, oy + dy, oz + dz)
+        end
+      end
+    end
+  end
+  walk(main, 0, 0, 0, 0)
+  return found
+end
+
+-- the box around those parts and their default sub parts, as they sit on the donor
+S.donorFrontBounds = function(model, parts)
+  local okCtx, ioCtx = pcall(jbeamIO.startLoading, modelDirs(model))
+  if not okCtx then return nil end
+  local lo, hi = vec3(math.huge, math.huge, math.huge), vec3(-math.huge, -math.huge, -math.huge)
+  local count, visited = 0, {}
+  local function walk(name, depth, ox, oy, oz)
+    if depth > 6 or visited[name] then return end
+    visited[name] = true
+    local okP, part = pcall(origGetPart, ioCtx, name)
+    if not okP or type(part) ~= 'table' then return end
+    for _, row in ipairs(type(part.nodes) == 'table' and part.nodes or {}) do
+      if type(row) == 'table' and type(row[1]) == 'string' and type(row[2]) == 'number' then
+        local x, y, z = row[2] + ox, (tonumber(row[3]) or 0) + oy, (tonumber(row[4]) or 0) + oz
+        lo:set(math.min(lo.x, x), math.min(lo.y, y), math.min(lo.z, z))
+        hi:set(math.max(hi.x, x), math.max(hi.y, y), math.max(hi.z, z))
+        count = count + 1
+      end
+    end
+    for _, s in ipairs(part.slots2 or part.slots or {}) do
+      if type(s) == 'table' and type(s.default) == 'string' and s.default ~= '' then
+        local dx, dy, dz = S.slotOffset(s)
+        walk(s.default, depth + 1, ox + dx, oy + dy, oz + dz)
+      end
+    end
+  end
+  for _, p in ipairs(parts) do
+    local o = p.offset or {}
+    walk(p.name, 0, o[1] or 0, o[2] or 0, o[3] or 0)
+  end
+  if count == 0 then return nil end
+  return lo, hi
+end
+
+-- the car's own front end parts in its parts tree: {path = slot names from the root, part}
+S.targetFrontParts = function(target)
+  local d = core_vehicle_manager.getVehicleData(target:getID())
+  local tree = d and d.config and d.config.partsTree
+  local list = {}
+  local function walk(node, path, depth)
+    if depth > 10 or type(node) ~= 'table' or type(node.children) ~= 'table' then return end
+    for slot, child in pairs(node.children) do
+      if type(slot) == 'string' and type(child) == 'table' and slot:sub(1, #extraSlotPrefix) ~= extraSlotPrefix then
+        local part = child.chosenPartName
+        local p = {}
+        for i, v in ipairs(path) do p[i] = v end
+        p[#p + 1] = slot
+        if type(part) == 'string' and part ~= '' then
+          if S.isFrontPart(slot, part) then list[#list + 1] = {path = p, part = part} else walk(child, p, depth + 1) end
+        end
+      end
+    end
+  end
+  walk(tree, {}, 0)
+  return list
+end
+
+-- the box around the car's front end (its own front parts' nodes; without those, its front 60 cm)
+S.targetFrontBounds = function(target)
+  local vd = getVData(target:getID())
+  if not (vd and vd.nodes) then return nil end
+  local names = {}
+  for _, f in ipairs(S.targetFrontParts(target)) do names[f.part] = true end
+  local n = target:getNodeCount()
+  local function box(pick)
+    local lo, hi = vec3(math.huge, math.huge, math.huge), vec3(-math.huge, -math.huge, -math.huge)
+    local count = 0
+    for cid = 0, n - 1 do
+      local nd = vd.nodes[cid]
+      if type(nd) == 'table' and not isWheelNode(vd, cid) and pick(nd, cid) then
+        local p = vec3(target:getInitialNodePosition(cid))
+        lo:set(math.min(lo.x, p.x), math.min(lo.y, p.y), math.min(lo.z, p.z))
+        hi:set(math.max(hi.x, p.x), math.max(hi.y, p.y), math.max(hi.z, p.z))
+        count = count + 1
+      end
+    end
+    if count == 0 then return nil end
+    return lo, hi
+  end
+  local lo, hi = box(function(nd) return names[nd.partOrigin] == true end)
+  if lo then return lo, hi end
+  local own = function(nd) return not (type(nd.name) == 'string' and (nd.name:find('^upa%d+_') or nd.name:find('^ups%w+_'))) end
+  local allLo = box(own)
+  if not allLo then return nil end
+  return box(function(nd, cid) return own(nd) and target:getInitialNodePosition(cid).y < allLo.y + 0.6 end)
+end
+
+-- the made-up front end part's name for a donor
+S.frontEndName = function(model) return 'upa_frontend_' .. tostring(model) end
+
+-- the preview: centred on the car, its front at the car's front, its bottom at the car's front
+-- bottom, and (autoScale) as wide as the car's own front end
+S.spawnFrontEnd = function(target, model, parts, removeOwn, autoScale)
+  if #parts == 0 then msg('Pasirink bent viena priekio detale.', 5) return end
+  local spec = {parts = {}, removeOwn = removeOwn or nil}
+  for _, p in ipairs(parts) do spec.parts[#spec.parts + 1] = {name = p.name, offset = p.offset} end
+  local preset = {mode = 'part', frontEnd = spec, rot = {0, 0, 0}, move = {0, 0, 0}}
+  local dLo, dHi = S.donorFrontBounds(model, parts)
+  local tLo, tHi = S.targetFrontBounds(target)
+  if dLo then
+    local c = (dLo + dHi) * 0.5
+    preset.pivot = {c.x, c.y, c.z}
+    if tLo then
+      local s = 1
+      local dw, tw = dHi.x - dLo.x, tHi.x - tLo.x
+      if autoScale and dw > 0.2 and tw > 0.2 then s = math.max(0.6, math.min(1.6, tw / dw)) end
+      preset.scale = s
+      preset.move = {(tLo.x + tHi.x) * 0.5 - c.x, tLo.y - (c.y + (dLo.y - c.y) * s), tLo.z - (c.z + (dLo.z - c.z) * s)}
+    end
+  end
+  spawnGhost(model, S.frontEndName(model), target, preset)
+  msg(string.format('Priekis is %s: %d detales. Detale korteleje pastumdyk, pakeisk dydi ir spausk PRITVIRTINTI.', tostring(model), #parts), 8)
+end
+
+-- set the chosen parts at those tree paths (nil: back to each one's own part, '' empties the slot)
+S.setTreeParts = function(cfg, list, value)
+  for _, f in ipairs(list or {}) do
+    local node = cfg.partsTree
+    for _, slot in ipairs(f.path or {}) do
+      node = type(node) == 'table' and type(node.children) == 'table' and node.children[slot] or nil
+    end
+    if type(node) == 'table' then
+      node.chosenPartName = value or f.part
+      node.children = nil
+    end
+    local last = f.path and f.path[#f.path]
+    if last and type(cfg.parts) == 'table' and cfg.parts[last] ~= nil then cfg.parts[last] = value or f.part end
+  end
+end
+
 local function spawnSelectedPart()
   local target = getPlayerVehicle(0)
   if not target then msg('Pirma isek i masina, ant kurios desi detale.') return end
@@ -4751,11 +5014,16 @@ S.respawnGhost = function(e, meshOnly)
     scale = math.max(0.05, e.scale[0]),
   }
   if meshOnly == nil then meshOnly = e.mode == 'meshonly' end
+  if e.frontEnd then
+    -- a front end is never a model only part
+    preset.frontEnd = e.frontEnd
+    meshOnly = false
+  end
   if meshOnly then
     local nodes = e.mode == 'meshonly' and e.meshNodes or S.meshNodesFor(e.model, e.partName)
     if not nodes or #nodes == 0 then msg('Si detale neturi modelio (tik duomenys) - nera ka parodyti.', 6) return end
     preset.mode, preset.meshNodes = 'meshonly', nodes
-  else
+  elseif not e.frontEnd then
     local reason = S.meshOnlyReason(e.model, e.partName)
     if reason then msg(S.meshOnlyMessage(reason, e.partName), 8) return end
   end
@@ -5579,7 +5847,12 @@ local function drawInstalledSection(player)
   end
   for i, ex in ipairs(extras) do
     im.PushID1('extra' .. i)
-    imText(string.format('%d. %s  (is %s)%s', i, tostring(ex.part), tostring(ex.model), ex.meshOnly and '  [tik modelis]' or ex.dataOnly and '  [tik duomenys]' or ''))
+    local isFront = type(ex.frontEnd) == 'table'
+    if isFront then
+      imText(string.format('%d. PRIEKIS is %s (%d detales)', i, tostring(ex.model), #(ex.frontEnd.parts or {})))
+    else
+      imText(string.format('%d. %s  (is %s)%s', i, tostring(ex.part), tostring(ex.model), ex.meshOnly and '  [tik modelis]' or ex.dataOnly and '  [tik duomenys]' or ''))
+    end
     if ex.dataOnly then
       -- nothing to move, mirror or give physics: it can only come off
       im.SameLine()
@@ -5594,6 +5867,9 @@ local function drawInstalledSection(player)
       if im.IsItemHovered() then im.SetTooltip('Nuima detale ir vel leidzia ja stumdyti') end
       im.SameLine()
       if im.SmallButton('Nuimti') then removeExtra(player, i) end
+      if isFront and im.IsItemHovered() then im.SetTooltip('Priekis nuimamas, tavo masinos savos priekio detales grizta.') end
+    end
+    if not ex.dataOnly and not isFront then
       im.SameLine()
       if im.SmallButton('Veidrodis') then S.spawnMirror(player, ex.model, ex.part, ex.move, ex.rot, ex.pivot, ex.meshOnly, ex.scale) end
       if im.IsItemHovered() then im.SetTooltip('Tokia pati detale kitoje puseje: atsiras perziura, pastumdyk ir PRITVIRTINK.') end
@@ -5921,6 +6197,190 @@ S.primaryButton = function(label, size)
   return pressed
 end
 
+-- car cutter (unfinished; its tab is only in Part Attacher Experimental): the car's own body in
+-- its jbeam space (all of it, also what a cut made into mesh holders) and three kept nodes that
+-- place the cut plane in the world.
+-- Built again for every spawn of the car (its vehicle data is a new table then).
+S.cutInfo = function(veh)
+  local id = veh:getID()
+  local vd = getVData(id)
+  if not (vd and vd.nodes) then return nil end
+  local c = S.cutCache
+  if c and c.id == id and c.vd == vd then return c end
+  local n = veh:getNodeCount()
+  local lo, hi = vec3(math.huge, math.huge, math.huge), vec3(-math.huge, -math.huge, -math.huge)
+  local solid, count = {}, 0
+  for cid = 0, n - 1 do
+    local nd = vd.nodes[cid]
+    local name = type(nd) == 'table' and nd.name
+    local added = type(name) == 'string' and (name:find('^upa%d+_') or name:find('^ups%w+_'))
+    if nd and not added and not isWheelNode(vd, cid) then
+      count = count + 1
+      local p = vec3(veh:getInitialNodePosition(cid))
+      lo:set(math.min(lo.x, p.x), math.min(lo.y, p.y), math.min(lo.z, p.z))
+      hi:set(math.max(hi.x, p.x), math.max(hi.y, p.y), math.max(hi.z, p.z))
+      if not nd.upaCut then solid[#solid + 1] = cid end
+    end
+  end
+  if count < 3 then return nil end
+  local a, b, cc
+  local ref = vd.refNodes and vd.refNodes[0]
+  if ref then
+    a, b, cc = ref.ref, ref.back, ref.up
+    if not validAnchors(veh, a, b, cc, n) then cc = ref.left end
+  end
+  if not validAnchors(veh, a, b, cc, n) then a, b, cc = pickAnchors(veh, solid) end
+  if not a then return nil end
+  S.cutCache = {id = id, vd = vd, lo = lo, hi = hi, a = a, b = b, c = cc}
+  return S.cutCache
+end
+
+-- the cut plane across the car (jbeam y), and an arrow towards the side that comes off
+S.drawCutPlane = function(veh, info, y, keepFront)
+  local okR, Rt, wA, iA = pcall(nodeFrameRot, veh, info.a, info.b, info.c)
+  if not okR or not Rt then return end
+  local function world(x, z) return wA + Rt * (vec3(x, y, z) - iA) end
+  local x0, x1 = info.lo.x - 0.15, info.hi.x + 0.15
+  local z0, z1 = info.lo.z - 0.05, info.hi.z + 0.15
+  local p1, p2, p3, p4 = world(x0, z0), world(x1, z0), world(x1, z1), world(x0, z1)
+  local fill = color(255, 102, 0, 70)
+  debugDrawer:drawTriSolid(p1, p2, p3, fill)
+  debugDrawer:drawTriSolid(p1, p3, p4, fill)
+  debugDrawer:drawTriSolid(p3, p2, p1, fill)
+  debugDrawer:drawTriSolid(p4, p3, p1, fill)
+  local edge = ColorF(1, 0.4, 0, 1)
+  debugDrawer:drawLine(p1, p2, edge)
+  debugDrawer:drawLine(p2, p3, edge)
+  debugDrawer:drawLine(p3, p4, edge)
+  debugDrawer:drawLine(p4, p1, edge)
+  local mid = (p1 + p3) * 0.5
+  local dir = Rt * vec3(0, keepFront and 1 or -1, 0)
+  debugDrawer:drawLine(mid, mid + dir * 1.0, ColorF(1, 0.15, 0.1, 1))
+  debugDrawer:drawTextAdvanced(mid + dir * 1.1, String(L('nupjaunama')), ColorF(1, 1, 1, 1), true, false, ColorI(160, 20, 10, 200))
+end
+
+S.drawCutSection = function(player)
+  if not player then imText('Isek i masina.') return end
+  local info = S.cutInfo(player)
+  if not info then imText('Nepavyko nuskaityti masinos.') return end
+  local id = player:getID()
+  local current = getPA(id).cut
+  local length = math.max(0.5, info.hi.y - info.lo.y)
+  S.cutPosPtr = S.cutPosPtr or im.FloatPtr(0)
+  S.cutShowPtr = S.cutShowPtr or im.BoolPtr(true)
+  -- the car's own cut when switching cars, else the middle
+  if S.cutLoadedFor ~= id then
+    S.cutLoadedFor = id
+    if type(current) == 'table' and tonumber(current.y) then
+      S.cutPosPtr[0] = tonumber(current.y) - info.lo.y
+      S.cutKeepFront = current.keep ~= 'rear'
+    else
+      S.cutPosPtr[0] = length * 0.5
+      S.cutKeepFront = true
+    end
+  end
+
+  im.TextColored(im.ImVec4(1, 0.75, 0.2, 1), L('EKSPERIMENTINE funkcija: gali glitchinti, issisaugok masina pries pjaudamas.'))
+  imText('Nupjauk dali savo masinos: kas uz plokstumos, nuimama (ratai, sijos, detales).')
+  imText('Per pjuvi einantys modeliai perpjaunami tikrai (pirmas pjuvis uztrunka sekunde). Pridetos detales ir pakeistos pakabos lieka.')
+  sliderRow('Pjovimo vieta nuo priekio (m)', S.cutPosPtr, 0.05, 0, length, '%.2f')
+  S.cutPosPtr[0] = math.max(0, math.min(length, S.cutPosPtr[0]))
+  imText(string.format('Masinos ilgis: %.2f m', length))
+  local frontButton = S.cutKeepFront and S.primaryButton or im.Button
+  if frontButton('Palikti PRIEKI##cutfront', im.ImVec2(0, 0)) then S.cutKeepFront = true end
+  im.SameLine()
+  local rearButton = S.cutKeepFront and im.Button or S.primaryButton
+  if rearButton('Palikti GALA##cutrear', im.ImVec2(0, 0)) then S.cutKeepFront = false end
+  im.Checkbox('Rodyti pjovimo plokstuma', S.cutShowPtr)
+  if S.cutShowPtr[0] then S.drawCutPlane(player, info, info.lo.y + S.cutPosPtr[0], S.cutKeepFront) end
+
+  if S.primaryButton('PJAUTI##cutapply', im.ImVec2(-1, 0)) then
+    local y, keep, at = info.lo.y + S.cutPosPtr[0], S.cutKeepFront and 'front' or 'rear', S.cutPosPtr[0]
+    -- the models across the plane, cut for real (reads the car's model file: a second or two)
+    local okB, meshes, summary, meshDir = pcall(S.buildCutMeshes, player, y, keep ~= 'rear')
+    if not okB then
+      log('E', logTag, 'car cutter: cutting the models failed: ' .. tostring(meshes))
+      meshes, summary = {}, 'failed'
+    end
+    log('I', logTag, 'car cutter: ' .. tostring(summary))
+    local spec = {y = y, keep = keep, meshes = meshes, meshDir = okB and meshDir or nil}
+    -- the respawn comes in place: stand the car up first (a cut half tipped onto its cut end would
+    -- spawn into the ground)
+    local fwd = vec3(player:getDirectionVector())
+    fwd.z = 0
+    if fwd:length() > 1e-3 then
+      local pos = player:getPosition()
+      local rot = quatFromDir(fwd:normalized(), vec3(0, 0, 1))
+      player:setPositionRotation(pos.x, pos.y, pos.z + 0.2, rot.x, rot.y, rot.z, rot.w)
+    end
+    if respawnWithConfig(player, function(cfg) cfg.partAttacher.cut = spec end) then
+      msg(string.format('Masina nupjauta %.2f m nuo priekio, lieka %s.', at, keep == 'rear' and 'galas' or 'priekis'), 6)
+    end
+  end
+  if type(current) == 'table' and tonumber(current.y) then
+    imText(string.format('Dabar nupjauta %.2f m nuo priekio, liko %s.', tonumber(current.y) - info.lo.y, current.keep == 'rear' and 'galas' or 'priekis'))
+    if im.Button('Atkurti visa masina##cutundo', im.ImVec2(-1, 0)) then
+      if respawnWithConfig(player, function(cfg) cfg.partAttacher.cut = nil end) then msg('Masina vel visa.', 5) end
+    end
+  end
+  imText('Prie pjuvio gali prideti kitos masinos pakaba (Detale, pakabos aplankas) ar detales.')
+  imText('Kitos masinos puse prie pjuvio - kitame zingsnyje.')
+end
+
+-- section 7, front end swap: pick the donor car, tick its front parts, spawn them as one preview
+S.feSearchPtr = im.ArrayChar(64)
+S.feRemovePtr = im.BoolPtr(true)
+S.feAutoScalePtr = im.BoolPtr(true)
+S.drawFrontSection = function(player)
+  if not player then imText('Isek i masina.') return end
+  if not S.modelList then loadModelList() end
+  if im.BeginCombo('Masina (donoras)##femodel', S.feModel or 'pasirink modeli...') then
+    im.InputText('Paieska##femodels', S.feSearchPtr, 64)
+    local ms = ffi.string(S.feSearchPtr):lower()
+    for _, m in ipairs(S.modelList) do
+      if (ms ~= '' and m.label:lower():find(ms, 1, true)) or (ms == '' and m.group == 'drive') then
+        if im.Selectable1(m.label .. '##fe' .. m.key, m.key == S.feModel) then S.feModel = m.key end
+      end
+    end
+    im.EndCombo()
+  end
+  if not S.feModel then
+    imText('Pasirink masina, kurios prieki nori.')
+    return
+  end
+  -- its front end parts, found once per model (all ticked)
+  if not (S.feParts and S.feParts.model == S.feModel) then
+    local okF, list = pcall(S.findFrontParts, S.feModel)
+    if not okF then log('E', logTag, 'front end parts of ' .. tostring(S.feModel) .. ': ' .. tostring(list)) end
+    S.feParts = {model = S.feModel, list = okF and list or {}, on = {}}
+    for i = 1, #S.feParts.list do S.feParts.on[i] = im.BoolPtr(true) end
+  end
+  local list = S.feParts.list
+  if #list == 0 then
+    imText('Sios masinos priekio detaliu nerasta.')
+    return
+  end
+  imText(string.format('Priekio detales (%d) - nuimk varneles, ko nereikia:', #list))
+  if im.BeginChild1('##feparts', im.ImVec2(0, 200), true) then
+    for i, p in ipairs(list) do
+      ui_imgui.Checkbox(string.format('%s  (%s)##fepart%d', tostring(p.desc), tostring(p.name), i), S.feParts.on[i])
+    end
+  end
+  im.EndChild()
+  im.Checkbox('Nuimti savo masinos priekio detales', S.feRemovePtr)
+  if im.IsItemHovered() then im.SetTooltip('Tavo buferis, sparnai, kapotas, zibintai, groteles nuimami (Parts meniu), kai prieki pritvirtini; nuemus prieki - grizta.') end
+  im.Checkbox('Auto dydis (pagal tavo masinos ploti)', S.feAutoScalePtr)
+  if S.primaryButton('SPAWN FRONT END##fespawn', im.ImVec2(-1, 0)) then
+    local picked = {}
+    for i, p in ipairs(list) do
+      if S.feParts.on[i][0] then picked[#picked + 1] = p end
+    end
+    S.spawnFrontEnd(player, S.feModel, picked, S.feRemovePtr[0], S.feAutoScalePtr[0])
+  end
+  imText('Atsiras visas priekis kaip viena perziura - Detale korteleje pastumdyk (X/Y/Z),')
+  imText('pakeisk dydi ir spausk PRITVIRTINTI. Idiegta korteleje ji galima perkelti ar nuimti.')
+end
+
 -- the window's tabs: id, tab label, the old section title shown on top of it. The part tab holds
 -- sections 1 and 2 (picking and placing a part), so a new preview needs no other tab
 S.tabs = {
@@ -5929,6 +6389,8 @@ S.tabs = {
   {id = 'dt', label = 'Pavaros', title = '4. Universalios pavaros (kardanas / diferencialai / pusasiai)'},
   {id = 'susp', label = 'Pakaba', title = '5. Pakaba (logic): prosvaisa, spyruokles, amortizatoriai'},
   {id = 'safe', label = 'Elektronika', title = '6. Saugos elektronika (ABS, TC, ESC, 2-step, line lock)'},
+  -- (the car cutter, S.drawCutSection, is not finished: it lives in Part Attacher Experimental only)
+  {id = 'front', label = 'Priekis', title = '7. Priekio swap: visas kitos masinos priekis'},
 }
 
 local function drawWindow()
@@ -5995,6 +6457,8 @@ local function drawWindow()
       dt = function() drawDrivetrainSection(player) end,
       susp = function() drawSuspSection(player) end,
       safe = function() S.drawSafetySection(player) end,
+      cut = function() S.drawCutSection(player) end,
+      front = function() S.drawFrontSection(player) end,
     }
     if im.BeginTabBar('##partAttacherTabs', im.TabBarFlags_FittingPolicyResizeDown) then
       for _, t in ipairs(S.tabs) do
@@ -6089,6 +6553,640 @@ end
 -- hooks
 --------------------------------------------------------------------------------
 
+-- car cutter (experimental). The models: a mesh across the cut plane is cut for real - the car's
+-- Collada file is read, the mesh's triangles beyond the plane go, the ones across it are clipped,
+-- and the cut mesh is written as a small Collada file next to the car's own (its spawn finds it
+-- there). A mesh lives in the car's jbeam space (meshes bind to the nodes by position), moved by
+-- its flexbody pos / scale and its node's matrix. Returns the text of that file, or nil and why.
+S.cutMeshPrefix = 'partattacherexp_cut_' -- the first version wrote its cut meshes into the car's folder under this name
+S.cutMeshRoot = '/settings/partAttacher/cutmeshes/'
+
+S.cutDaeMesh = function(text, mesh, newName, y0, keepFront, posY, scaleY)
+  local esc = mesh:gsub('%p', '%%%0')
+  local gs = text:find('<geometry id="[^"]*" name="' .. esc .. '">')
+  if not gs then return nil, 'no geometry' end
+  local ge = text:find('</geometry>', gs, true)
+  if not ge then return nil, 'broken geometry' end
+  local geom = text:sub(gs, ge + 10)
+  -- the node that places the mesh: its matrix and its materials
+  local matrix, bind = '1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1', nil
+  local ns = text:find('<node id="[^"]*" name="' .. esc .. '"')
+  if ns then
+    local ne = text:find('</node>', ns, true)
+    local node = ne and text:sub(ns, ne) or ''
+    matrix = node:match('<matrix[^>]*>([^<]*)</matrix>') or matrix
+    bind = node:match('<bind_material>.-</bind_material>')
+  end
+  local m = {}
+  for v in matrix:gmatch('%S+') do m[#m + 1] = tonumber(v) or 0 end
+  if #m < 12 then m = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0} end
+
+  local sources = {}
+  for src in geom:gmatch('<source .-</source>') do
+    local id = src:match('<source id="([^"]*)"')
+    local arr = src:match('<float_array id="[^"]*" count="%d+">([^<]*)</float_array>')
+    if id and arr then
+      local values = {}
+      for v in arr:gmatch('%S+') do values[#values + 1] = tonumber(v) or 0 end
+      sources[id] = {id = id, text = src, values = values, stride = tonumber(src:match('stride="(%d+)"')) or 1}
+    end
+  end
+  local vertsId, vertsBody = geom:match('<vertices id="([^"]*)">(.-)</vertices>')
+  local vertSources, posSource = {}, nil
+  for sem, srcId in (vertsBody or ''):gmatch('<input semantic="(%w+)" source="#([^"]*)"') do
+    if sources[srcId] then vertSources[#vertSources + 1] = {sem = sem, src = sources[srcId]} end
+    if sem == 'POSITION' then posSource = sources[srcId] end
+  end
+  if not (vertsId and posSource) then return nil, 'no positions' end
+
+  local function countOf(s) return math.floor(#s.values / s.stride) end
+  -- a new corner between two old ones: every source read at that offset gets the blended value
+  local function lerpIndex(group, i, j, t)
+    local idx = 0
+    for _, g in ipairs(group) do idx = math.max(idx, countOf(g.src)) end
+    for _, g in ipairs(group) do
+      local s, st = g.src, g.src.stride
+      while countOf(s) < idx do
+        for _ = 1, st do s.values[#s.values + 1] = 0 end
+      end
+      local base = #s.values
+      for c = 1, st do
+        local a, b = s.values[i * st + c] or 0, s.values[j * st + c] or 0
+        s.values[base + c] = a + (b - a) * t
+      end
+      if g.sem == 'NORMAL' and st == 3 then
+        local x, y, z = s.values[base + 1], s.values[base + 2], s.values[base + 3]
+        local l = math.sqrt(x * x + y * y + z * z)
+        if l > 1e-9 then s.values[base + 1], s.values[base + 2], s.values[base + 3] = x / l, y / l, z / l end
+      end
+    end
+    return idx
+  end
+  -- how far a position lies beyond the plane (> 0: it goes)
+  local pv = posSource.values
+  local function side(i)
+    local x, y, z = pv[i * 3 + 1] or 0, pv[i * 3 + 2] or 0, pv[i * 3 + 3] or 0
+    local vy = (m[5] * x + m[6] * y + m[7] * z + m[8]) * scaleY + posY
+    if keepFront then return vy - y0 end
+    return y0 - vy
+  end
+
+  local prims, materials, total = {}, {}, 0
+  for _, kind in ipairs({'triangles', 'polylist'}) do
+    for attrs, body in geom:gmatch('<' .. kind .. '([^>]*)>(.-)</' .. kind .. '>') do
+      local material = attrs:match('material="([^"]*)"') or ''
+      local inputs, tags, maxOff, vOff = {}, {}, 0, nil
+      for tag in body:gmatch('<input [^>]*/>') do
+        local inp = {sem = tag:match('semantic="(%w+)"'), srcId = tag:match('source="#([^"]*)"'), off = tonumber(tag:match('offset="(%d+)"')) or 0}
+        inputs[#inputs + 1] = inp
+        tags[#tags + 1] = tag
+        maxOff = math.max(maxOff, inp.off)
+        if inp.sem == 'VERTEX' then vOff = inp.off end
+      end
+      if vOff then
+        local stride = maxOff + 1
+        local groups = {}
+        for _, inp in ipairs(inputs) do
+          groups[inp.off] = groups[inp.off] or {}
+          if inp.sem == 'VERTEX' then
+            for _, vs in ipairs(vertSources) do table.insert(groups[inp.off], vs) end
+          elseif sources[inp.srcId] then
+            table.insert(groups[inp.off], {sem = inp.sem, src = sources[inp.srcId]})
+          end
+        end
+        local vcount
+        local vc = body:match('<vcount>([^<]*)</vcount>')
+        if vc then
+          vcount = {}
+          for v in vc:gmatch('%d+') do vcount[#vcount + 1] = tonumber(v) end
+        end
+        local p = {}
+        for v in (body:match('<p>([^<]*)</p>') or ''):gmatch('%d+') do p[#p + 1] = tonumber(v) end
+        local out, tris, at = {}, 0, 1
+        local polys = vcount and #vcount or math.floor(#p / (3 * stride))
+        for poly = 1, polys do
+          local n = vcount and vcount[poly] or 3
+          local corners, inside, outside = {}, 0, 0
+          for c = 1, n do
+            local idx = {}
+            for o = 0, stride - 1 do idx[o] = p[at + o] or 0 end
+            at = at + stride
+            local d = side(idx[vOff])
+            corners[c] = {idx = idx, d = d}
+            if d <= 0 then inside = inside + 1 else outside = outside + 1 end
+          end
+          local keep = corners
+          if outside == n then
+            keep = {}
+          elseif outside > 0 then
+            -- Sutherland-Hodgman against the plane
+            keep = {}
+            for c = 1, n do
+              local a, b = corners[c], corners[c % n + 1]
+              local ain, bin = a.d <= 0, b.d <= 0
+              if ain then keep[#keep + 1] = a end
+              if ain ~= bin then
+                local t = a.d / (a.d - b.d)
+                local idx = {}
+                for o = 0, stride - 1 do
+                  if a.idx[o] == b.idx[o] or not groups[o] then idx[o] = a.idx[o]
+                  else idx[o] = lerpIndex(groups[o], a.idx[o], b.idx[o], t) end
+                end
+                keep[#keep + 1] = {idx = idx, d = 0}
+              end
+            end
+          end
+          for k = 2, #keep - 1 do
+            for _, c in ipairs({keep[1], keep[k], keep[k + 1]}) do
+              for o = 0, stride - 1 do out[#out + 1] = c.idx[o] end
+            end
+            tris = tris + 1
+          end
+        end
+        if tris > 0 then
+          prims[#prims + 1] = string.format('<triangles material="%s" count="%d">%s<p>%s</p></triangles>', material, tris, table.concat(tags), table.concat(out, ' '))
+          materials[material] = true
+          total = total + tris
+        end
+      end
+    end
+  end
+  if total == 0 then return nil, 'empty' end
+
+  local parts = {}
+  for _, s in pairs(sources) do
+    local nums = {}
+    for i, v in ipairs(s.values) do nums[i] = string.format('%.6g', v) end
+    local count = #s.values
+    local txt = s.text:gsub('(<float_array id="[^"]*" count=")%d+(">)[^<]*(</float_array>)', function(a, b, c) return a .. count .. b .. table.concat(nums, ' ') .. c end)
+    txt = txt:gsub('(<accessor [^>]*count=")%d+(")', function(a, b) return a .. math.floor(count / s.stride) .. b end)
+    parts[#parts + 1] = txt
+  end
+  if not bind then
+    local list = {}
+    for mat, _ in pairs(materials) do list[#list + 1] = string.format('<instance_material symbol="%s" target="#%s"/>', mat, mat) end
+    bind = '<bind_material><technique_common>' .. table.concat(list) .. '</technique_common></bind_material>'
+  end
+  local function block(tag)
+    return text:match('<' .. tag .. '>.-</' .. tag .. '>') or ''
+  end
+  return table.concat({
+    '<?xml version="1.0" encoding="utf-8"?>\n',
+    '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">\n',
+    block('asset'), '\n', block('library_effects'), '\n', block('library_images'), '\n', block('library_materials'), '\n',
+    '<library_geometries><geometry id="', newName, '-mesh" name="', newName, '"><mesh>\n',
+    table.concat(parts, '\n'), '\n<vertices id="', vertsId, '">', vertsBody, '</vertices>\n', table.concat(prims, '\n'),
+    '\n</mesh></geometry></library_geometries>\n',
+    '<library_visual_scenes><visual_scene id="Scene" name="Scene"><node id="', newName, '" name="', newName, '" type="NODE">',
+    '<matrix sid="transform">', matrix, '</matrix><instance_geometry url="#', newName, '-mesh" name="', newName, '">', bind,
+    '</instance_geometry></node></visual_scene></library_visual_scenes>\n',
+    '<scene><instance_visual_scene url="#Scene"/></scene>\n</COLLADA>\n',
+  })
+end
+
+-- the meshes of the car (the spawned one) across a cut at jbeam y0, cut and written once (a file
+-- per mesh and cut position, reused after that). Returns {original mesh = cut mesh name, or false
+-- when nothing of it stays} and a summary.
+S.buildCutMeshes = function(veh, y0, keepFront)
+  local vd = getVData(veh:getID())
+  if not (vd and type(vd.flexbodies) == 'table' and type(vd.nodes) == 'table') then return {}, 'no vehicle data' end
+  local function own(cid)
+    local nd = vd.nodes[cid]
+    local name = type(nd) == 'table' and nd.name
+    return nd ~= nil and not (type(name) == 'string' and (name:find('^upa%d+_') or name:find('^ups%w+_')))
+  end
+  local wanted, order = {}, {}
+  for _, fb in pairs(vd.flexbodies) do
+    -- the jbeam name: the game may rename a loaded mesh (originalMesh), a cut keeps it in upaOrigMesh
+    local mesh = type(fb) == 'table' and (fb.upaOrigMesh or fb.originalMesh or fb.mesh)
+    local nodes = type(fb) == 'table' and (fb.upaGroupNodes or fb._group_nodes)
+    if type(mesh) == 'string' and type(nodes) == 'table' and not wanted[mesh] then
+      local ownCount, beyondCount = 0, 0
+      for _, cid in ipairs(nodes) do
+        if own(cid) then
+          ownCount = ownCount + 1
+          local p = veh:getInitialNodePosition(cid)
+          if (keepFront and p.y > y0) or (not keepFront and p.y < y0) then beyondCount = beyondCount + 1 end
+        end
+      end
+      local r = type(fb.rot) == 'table' and fb.rot or {}
+      local rotated = math.abs(tonumber(r.x) or 0) + math.abs(tonumber(r.y) or 0) + math.abs(tonumber(r.z) or 0) > 0.01
+      if beyondCount > 0 and beyondCount < ownCount and not rotated then
+        local pos, scale = type(fb.pos) == 'table' and fb.pos or {}, type(fb.scale) == 'table' and fb.scale or {}
+        local sy = tonumber(scale.y) or 1
+        wanted[mesh] = {posY = tonumber(pos.y) or 0, scaleY = math.abs(sy) > 1e-6 and sy or 1}
+        order[#order + 1] = mesh
+      end
+    end
+  end
+  if #order == 0 then return {}, 'no mesh crosses the cut' end
+
+  local dir = type(vd.vehicleDirectory) == 'string' and vd.vehicleDirectory or ('/vehicles/' .. tostring(veh.jbeam) .. '/')
+  if dir:sub(-1) ~= '/' then dir = dir .. '/' end
+  local files = FS:findFiles(dir, '*.dae', -1, true, false) or {}
+  -- the car's own files before its sub folders (a 3-wheel or trailer variant may name a mesh alike)
+  local function depth(p) return select(2, p:gsub('/', '')) end
+  table.sort(files, function(a, b)
+    if depth(a) ~= depth(b) then return depth(a) < depth(b) end
+    return a < b
+  end)
+  -- the cut meshes go to a folder of their own per car and cut, outside the car's folder: a new
+  -- mesh file in a vehicle's own folder makes the game reload that vehicle a second later (in
+  -- whatever pose it is then - a cut half tipped onto its cut end spawned into the ground and blew
+  -- up). The car finds them through that folder added to its search path (S.applyCut).
+  local model = dir:match('/vehicles/([^/]+)/') or tostring(veh.jbeam)
+  local cutTag = string.format('%s%d', keepFront and 'f' or 'r', math.floor(y0 * 1000 + 0.5)):gsub('%-', 'm')
+  local outDir = S.cutMeshRoot .. model .. '/' .. cutTag .. '/'
+  local result, made, reused, empty, left = {}, 0, 0, 0, #order
+  for _, path in ipairs(files) do
+    if left == 0 then break end
+    if not path:find(S.cutMeshPrefix, 1, true) then
+      local text = readFile(path)
+      for _, mesh in ipairs(order) do
+        local w = wanted[mesh]
+        if type(text) == 'string' and not w.done and text:find('<geometry id="[^"]*" name="' .. mesh:gsub('%p', '%%%0') .. '">') then
+          w.done, left = true, left - 1
+          local plane = (y0 - w.posY) / w.scaleY
+          local tag = string.format('%s%d', keepFront and 'f' or 'r', math.floor(plane * 1000 + 0.5)):gsub('%-', 'm')
+          local newName = mesh .. '_upacut_' .. tag
+          local outPath = outDir .. newName .. '.dae'
+          if FS:fileExists(outPath) then
+            result[mesh] = newName
+            reused = reused + 1
+          else
+            local okC, dae, why = pcall(S.cutDaeMesh, text, mesh, newName, y0, keepFront, w.posY, w.scaleY)
+            if okC and dae then
+              if not FS:directoryExists(outDir) then FS:directoryCreate(outDir, true) end
+              writeFile(outPath, dae)
+              if FS:fileExists(outPath) then
+                result[mesh] = newName
+                made = made + 1
+              else
+                log('W', logTag, 'car cutter: could not write ' .. outPath)
+              end
+            elseif okC and why == 'empty' then
+              result[mesh] = false
+              empty = empty + 1
+            else
+              log('W', logTag, string.format('car cutter: mesh %s not cut (%s)', mesh, tostring(okC and why or dae)))
+            end
+          end
+        end
+      end
+      text = nil
+    end
+  end
+  return result, string.format('%d meshes across the cut: %d cut now, %d reused, %d fully beyond, %d not found in %s (cut meshes in %s)', #order, made, reused, empty, left, dir, outDir), outDir
+end
+
+-- The structure: the car's own nodes beyond the plane leave it. The node and wheel lists must stay
+-- gap-free, so those nodes stay as light holders (no collision, 0.1 kg: too light to be welded to)
+-- that ride along on soft beams; their own beams stop pulling, their triangles stop colliding, their
+-- wheels go. A mesh across the cut is swapped for its cut version (S.buildCutMeshes) bound to the
+-- kept nodes only; one not cut stays whole, carried by the holders, unless it is mostly beyond.
+-- Added parts and swapped suspensions are not the car's own: they stay wherever they are.
+
+S.applyCut = function(vehicle, cut, marker)
+  local y0 = tonumber(cut.y)
+  if not y0 or type(vehicle.nodes) ~= 'table' then return 'no cut position' end
+  -- the folder holding this cut's meshes, on the search path the meshes are looked up in
+  if type(cut.meshDir) == 'string' and type(vehicle.directoriesLoaded) == 'table' then
+    local have = false
+    for _, d in ipairs(vehicle.directoriesLoaded) do
+      if d == cut.meshDir then have = true end
+    end
+    if not have then table.insert(vehicle.directoriesLoaded, cut.meshDir) end
+  end
+  local keepFront = cut.keep ~= 'rear'
+  -- jbeam: -Y is the front
+  local function beyond(p) if keepFront then return p.y > y0 else return p.y < y0 end end
+  local swapPrefixes = {}
+  for kind, _ in pairs(type(marker.partSwaps) == 'table' and marker.partSwaps or {}) do swapPrefixes[#swapPrefixes + 1] = partSwapPrefix(kind) end
+  local function ownNode(n)
+    if type(n.name) ~= 'string' then return true end
+    if n.name:find('^upa%d+_') then return false end
+    if type(n.partOrigin) == 'string' and n.partOrigin:sub(1, 9) == 'upa_swap_' then return false end
+    for _, p in ipairs(swapPrefixes) do
+      if n.name:sub(1, #p) == p then return false end
+    end
+    return true
+  end
+  local defaultMass = tonumber(type(vehicle.options) == 'table' and vehicle.options.nodeWeight) or 25
+
+  -- a wheel goes (or stays) whole, by its hub's side: a cut through a tyre keeps the tyre round
+  local wheels = type(vehicle.wheels) == 'table' and vehicle.wheels or {}
+  local wheelCount = tableSizeC(wheels)
+  local wheelGone, wheelsGone = {}, 0
+  for k = 0, wheelCount - 1 do
+    local w = wheels[k]
+    local n1 = type(w) == 'table' and vehicle.nodes[w.node1]
+    local n2 = type(w) == 'table' and vehicle.nodes[w.node2]
+    if n1 and n2 and ownNode(n1) and ownNode(n2) and beyond((n1.pos + n2.pos) * 0.5) then
+      wheelGone[k] = true
+      wheelsGone = wheelsGone + 1
+    end
+  end
+  local removed, removedCount, keptCount = {}, 0, 0
+  for cid, n in pairs(vehicle.nodes) do
+    if type(n) == 'table' and n.pos and ownNode(n) then
+      local gone
+      if n.wheelID ~= nil and wheels[n.wheelID] then gone = wheelGone[n.wheelID] == true else gone = beyond(n.pos) end
+      if gone then
+        removed[cid] = n
+        removedCount = removedCount + 1
+      else
+        keptCount = keptCount + 1
+      end
+    end
+  end
+  if removedCount == 0 then return 'nothing of the car is beyond the cut' end
+  if keptCount == 0 then return 'nothing of the car would stay' end
+  -- a kept node whose beams all went beyond the cut would hang free (fall, fly off): a holder too
+  local tied = {}
+  for _, b in pairs(vehicle.beams or {}) do
+    if type(b) == 'table' and b.id1 ~= b.id2 and not removed[b.id1] and not removed[b.id2] then
+      tied[b.id1], tied[b.id2] = true, true
+    end
+  end
+  local orphans = 0
+  for cid, n in pairs(vehicle.nodes) do
+    if type(n) == 'table' and n.pos and not removed[cid] and not tied[cid] and ownNode(n) and n.wheelID == nil then
+      removed[cid] = n
+      removedCount, keptCount, orphans = removedCount + 1, keptCount - 1, orphans + 1
+    end
+  end
+
+  -- the kept nodes at the cut the holders hang on: within 50 cm of the plane, at least 24 (the
+  -- holders' load spreads over them)
+  local kept = {}
+  for cid, n in pairs(vehicle.nodes) do
+    if type(n) == 'table' and n.pos and not removed[cid] and ownNode(n) and n.wheelID == nil
+      and (tonumber(n.nodeWeight) or defaultMass) >= 1 then
+      kept[#kept + 1] = n
+    end
+  end
+  table.sort(kept, function(a, b) return math.abs(a.pos.y - y0) < math.abs(b.pos.y - y0) end)
+  local anchors = {}
+  for _, n in ipairs(kept) do
+    if math.abs(n.pos.y - y0) > 0.5 and #anchors >= 24 then break end
+    anchors[#anchors + 1] = n
+  end
+  if #anchors < 3 then return 'too few nodes stay at the cut' end
+
+  -- beams, triangles, torsion bars, rails and props on the removed side. A beam can't be deleted
+  -- (beam ids must stay gap-free) and the physics never sees a beam type "broken" (setBeam takes
+  -- the spring and damping whatever the type): a plain beam with no spring and no damping pulls on
+  -- nothing. Bounded / pressured / anisotropic beams act through their own limits, so they become plain.
+  local NONCOLLIDABLE = 2
+  local beamsCut = 0
+  for _, b in pairs(vehicle.beams or {}) do
+    if type(b) == 'table' and (removed[b.id1] or removed[b.id2]) then
+      b.beamType = 0
+      b.beamSpring, b.beamDamp = 0, 0
+      b.beamStrength, b.beamDeform = math.huge, math.huge
+      b.beamPrecompression, b.beamPrecompressionTime, b.precompressionRange = 1, nil, nil
+      b.breakGroup, b.deformGroup, b.wheelID, b.deformationTriggerRatio = nil, nil, nil, nil
+      b.beamLimitSpring, b.beamLimitDamp, b.springExpansion, b.dampExpansion = nil, nil, nil, nil
+      beamsCut = beamsCut + 1
+    end
+  end
+  for _, t in pairs(vehicle.triangles or {}) do
+    if type(t) == 'table' and (removed[t.id1] or removed[t.id2] or removed[t.id3]) then
+      t.triangleType = NONCOLLIDABLE
+      t.pressureGroup, t.breakGroup = nil, nil
+      t.dragCoef, t.liftCoef = 0, 0
+    end
+  end
+  for _, sec in ipairs({'torsionbars', 'torsionHydros'}) do
+    for _, tb in pairs(type(vehicle[sec]) == 'table' and vehicle[sec] or {}) do
+      if type(tb) == 'table' and (removed[tb.id1] or removed[tb.id2] or removed[tb.id3] or removed[tb.id4]) then
+        tb.spring, tb.spring2, tb.damp, tb.damp2 = 0, 0, 0, 0
+        tb.precompressionTime, tb.precompressionAngle = nil, 0
+      end
+    end
+  end
+  for name, rail in pairs(type(vehicle.rails) == 'table' and vehicle.rails or {}) do
+    local links = type(rail) == 'table' and rail['links:']
+    if type(links) == 'table' then
+      local keep = {}
+      for _, cid in ipairs(links) do
+        if not removed[cid] then keep[#keep + 1] = cid end
+      end
+      if #keep < 2 then vehicle.rails[name] = nil elseif #keep < #links then rail['links:'] = keep end
+    end
+  end
+  for k, sn in pairs(type(vehicle.slidenodes) == 'table' and vehicle.slidenodes or {}) do
+    if type(sn) == 'table' and (removed[sn.id] or (type(sn.railName) == 'string' and not (type(vehicle.rails) == 'table' and vehicle.rails[sn.railName]))) then
+      vehicle.slidenodes[k] = nil
+    end
+  end
+  local propsGone = 0
+  for k, p in pairs(type(vehicle.props) == 'table' and vehicle.props or {}) do
+    if type(p) == 'table' and (removed[tonumber(p.idRef)] or removed[tonumber(p.idX)] or removed[tonumber(p.idY)]) then
+      vehicle.props[k] = nil
+      propsGone = propsGone + 1
+    end
+  end
+  -- meshes: one fully beyond the cut goes; one across it becomes its cut version (S.buildCutMeshes),
+  -- bound to the kept nodes only; one that could not be cut stays whole on the holders, unless most
+  -- of it is beyond (then it goes too). The original name and nodes stay on the flexbody, so the
+  -- next cut starts from the whole mesh again.
+  local cutMeshes = type(cut.meshes) == 'table' and cut.meshes or {}
+  local dropShare = math.max(0.3, math.min(1, tonumber(cut.dropShare) or 0.6))
+  local meshesGone, meshesCut = 0, 0
+  for _, fb in pairs(type(vehicle.flexbodies) == 'table' and vehicle.flexbodies or {}) do
+    local nodes = type(fb) == 'table' and fb._group_nodes
+    if type(nodes) == 'table' and #nodes > 0 then
+      local keptNodes = {}
+      for _, cid in ipairs(nodes) do
+        if not removed[cid] then keptNodes[#keptNodes + 1] = cid end
+      end
+      local cutNodes = #nodes - #keptNodes
+      local swap = cutMeshes[fb.mesh]
+      if cutNodes > 0 then
+        fb.upaGroupNodes = nodes
+        -- with fewer than 4 nodes left a mesh can't bind ("VY node not found"): it goes
+        if #keptNodes < 4 or swap == false or (type(swap) ~= 'string' and cutNodes >= dropShare * #nodes) then
+          fb._group_nodes = {}
+          meshesGone = meshesGone + 1
+        elseif type(swap) == 'string' then
+          fb.upaOrigMesh, fb.mesh = fb.mesh, swap
+          fb._group_nodes = keptNodes
+          meshesCut = meshesCut + 1
+        end
+      end
+    end
+  end
+
+  -- the wheel list without the gone wheels (the physics wants it gap-free), renumbered
+  if wheelsGone > 0 then
+    local remap, newWheels, nextId = {}, {}, 0
+    for k = 0, wheelCount - 1 do
+      local w = wheels[k]
+      if w and not wheelGone[k] then
+        remap[k] = nextId
+        w.cid = nextId
+        newWheels[nextId] = w
+        nextId = nextId + 1
+      end
+    end
+    vehicle.wheels = newWheels
+    if type(vehicle.maxIDs) == 'table' then vehicle.maxIDs.wheels = nextId end
+    for _, n in pairs(vehicle.nodes) do
+      if type(n) == 'table' and n.wheelID ~= nil then
+        n.wheelID = remap[n.wheelID]
+        if n.wheelID == nil then n.pairedNode, n.pairedNode2 = nil, nil end
+      end
+    end
+    for _, b in pairs(vehicle.beams or {}) do
+      if type(b) == 'table' and b.wheelID ~= nil then b.wheelID = remap[b.wheelID] end
+    end
+    S.cutWheelsGone = true
+  end
+
+  -- an engine (or motor) whose torque reaction nodes were cut off pushes on kept nodes at the cut
+  local trn = {anchors[1].cid, anchors[math.max(2, math.floor(#anchors / 2))].cid, anchors[#anchors].cid}
+  for _, section in pairs(vehicle) do
+    if type(section) == 'table' and type(section.torqueReactionNodes_nodes) == 'table' then
+      for _, cid in pairs(section.torqueReactionNodes_nodes) do
+        if removed[cid] then
+          section.torqueReactionNodes_nodes = {trn[1], trn[2], trn[3]}
+          break
+        end
+      end
+    end
+  end
+
+  -- the vehicle's reference nodes (its orientation, the cameras) must be kept nodes
+  local refs = type(vehicle.refNodes) == 'table' and vehicle.refNodes[0]
+  if type(refs) == 'table' then
+    local function nearestKept(pos, notCid)
+      local best, bestD
+      for _, n in ipairs(kept) do
+        local d = n.pos:distance(pos)
+        if n.cid ~= notCid and (not bestD or d < bestD) then best, bestD = n, d end
+      end
+      return best
+    end
+    -- ref -> back / left / up give the car its axes (direction, camera): a node standing in for a
+    -- cut one must lie the same way from the new ref, or the axes fold and turn NaN. When any of
+    -- them is cut off (or the ref is close to the cut), the set moves 0.6 m into the kept part.
+    local refNode = vehicle.nodes[refs.ref]
+    local inward = keepFront and -1 or 1
+    if refNode and (removed[refs.ref] or removed[refs.back] or removed[refs.left] or removed[refs.up]
+      or math.abs(refNode.pos.y - y0) < 0.5) then
+      local origin = refNode.pos
+      local spot = vec3(origin.x, y0 + inward * 0.6, origin.z)
+      if math.abs(origin.y - y0) >= 0.6 and not beyond(origin) then spot = vec3(origin) end
+      local newRef = nearestKept(spot)
+      if newRef then
+        local picked = {[newRef.cid] = true}
+        for _, key in ipairs({'back', 'left', 'up'}) do
+          local n = vehicle.nodes[refs[key]]
+          if refs[key] == refs.ref then
+            refs[key] = newRef.cid
+          elseif n then
+            local dir = (n.pos - origin)
+            local want = math.max(0.3, math.min(1.0, dir:length()))
+            dir = dir:normalized()
+            -- the kept node best along that direction, 15 cm to 1.5 m away
+            local best, bestScore
+            for _, k in ipairs(kept) do
+              if not picked[k.cid] then
+                local off = k.pos - newRef.pos
+                local len = off:length()
+                if len >= 0.15 and len <= 1.5 then
+                  local score = off:dot(dir) / len - 0.2 * math.abs(len - want)
+                  if not bestScore or score > bestScore then best, bestScore = k, score end
+                end
+              end
+            end
+            if best and bestScore > 0.5 then
+              refs[key] = best.cid
+              picked[best.cid] = true
+            end
+          end
+        end
+        refs.ref = newRef.cid
+        local function nodeName(cid) return tostring(vehicle.nodes[cid] and vehicle.nodes[cid].name or cid) end
+        log('I', logTag, string.format('car cutter: reference nodes now ref %s, back %s, left %s, up %s',
+          nodeName(refs.ref), nodeName(refs.back), nodeName(refs.left), nodeName(refs.up)))
+      end
+    end
+    for key, cid in pairs(refs) do
+      if type(cid) == 'number' and removed[cid] then
+        local pick = nearestKept(removed[cid].pos)
+        if pick then refs[key] = pick.cid end
+      end
+    end
+  end
+
+  -- the holders: light, no collision, riding along where they are on 3 soft beams each to nodes at
+  -- the cut (no mesh is bent: a cut mesh doesn't use them, an uncut one stays whole on them)
+  local holderMass = 0.1
+  local links, perAnchor = {}, {}
+  for cid, n in pairs(removed) do
+    n.collision, n.selfCollision, n.staticCollision = false, false, false
+    n.nodeWeight = holderMass
+    n.couplerTag, n.tag, n.fixed = nil, nil, nil
+    n.chemEnergy, n.flashPoint, n.isExhaust = nil, nil, nil
+    n.upaCut = true
+    -- of the 8 nearest nodes at the cut, the 3 least loaded so far: the load spreads out
+    local near = {}
+    for _, a in ipairs(anchors) do
+      local d = a.pos:distance(n.pos)
+      if d >= 0.05 then near[#near + 1] = {n = a, d = d} end
+    end
+    table.sort(near, function(a, b) return a.d < b.d end)
+    for m = #near, 9, -1 do near[m] = nil end
+    table.sort(near, function(a, b)
+      local la, lb = perAnchor[a.n.cid] or 0, perAnchor[b.n.cid] or 0
+      if la ~= lb then return la < lb end
+      return a.d < b.d
+    end)
+    for m = 1, math.min(3, #near) do
+      local a = near[m].n
+      links[#links + 1] = {cid = cid, holder = n, anchor = a}
+      perAnchor[a.cid] = (perAnchor[a.cid] or 0) + 1
+    end
+  end
+  -- soft, damped holder beams (a stiff light node rings): 3000 N/m, up to 15 Ns/m (0.1 kg on 3 of
+  -- them: damping * dt / mass ~ 0.2). Many holders share a node at the cut, so what they add must
+  -- also suit that node's mass at the 2 kHz step (omega * dt ~ 1.25, damping * dt / mass ~ 0.3 at most)
+  local existing = {}
+  for cid, _ in pairs(perAnchor) do existing[cid] = 0 end
+  for _, b in pairs(vehicle.beams or {}) do
+    local s = type(b) == 'table' and tonumber(b.beamSpring)
+    if s and s > 0 and s < 1e9 then
+      if existing[b.id1] then existing[b.id1] = existing[b.id1] + s end
+      if existing[b.id2] then existing[b.id2] = existing[b.id2] + s end
+    end
+  end
+  local omega2 = 2500 * 2500
+  local anchorSpring, anchorDamp = {}, {}
+  for cid, count in pairs(perAnchor) do
+    local mass = math.max(0.5, tonumber(vehicle.nodes[cid].nodeWeight) or defaultMass)
+    local budget = math.max(mass * omega2 - existing[cid], 0.2 * mass * omega2)
+    anchorSpring[cid] = math.min(3000, budget / count)
+    anchorDamp[cid] = math.min(15, 0.3 * mass / 0.0005 / count)
+  end
+  local holderBeams = 0
+  for _, l in ipairs(links) do
+    local bcid = vehicle.maxIDs.beams or 0
+    vehicle.maxIDs.beams = bcid + 1
+    vehicle.beams[bcid] = {
+      cid = bcid, id1 = l.cid, id2 = l.anchor.cid, beamType = 0,
+      beamSpring = anchorSpring[l.anchor.cid], beamDamp = anchorDamp[l.anchor.cid],
+      beamDeform = math.huge, beamStrength = math.huge,
+      partOrigin = l.holder.partOrigin,
+    }
+    holderBeams = holderBeams + 1
+  end
+
+  return string.format('%d nodes of the car beyond y %.2f (keeps the %s; %d left without beams) are holders now, %d beams let go, %d wheels and %d props taken off, %d meshes cut, %d meshes gone, %d holder beams (%d kept nodes at the cut)',
+    removedCount, y0, keepFront and 'front' or 'rear', orphans, beamsCut, wheelsGone, propsGone, meshesCut, meshesGone, holderBeams, #anchors)
+end
+
 -- runs inside the jbeam loader for every vehicle
 local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJournal, vehicleConfig, vars)
   if type(vehicle) ~= 'table' or type(vehicleConfig) ~= 'table' then return end
@@ -6109,6 +7207,13 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
     end
   end
   if lostRails > 0 and not marker.ghost then log('W', logTag, string.format('%d slidenodes on rails the vehicle does not have left out', lostRails)) end
+
+  -- car cutter first: the parts and swaps welded below must not hang on what the cut takes off
+  S.cutWheelsGone = nil
+  if type(marker.cut) == 'table' and not marker.ghost then
+    local okC, resC = pcall(S.applyCut, vehicle, marker.cut, marker)
+    log(okC and 'I' or 'E', logTag, 'car cutter: ' .. tostring(resC))
+  end
 
   -- ghost preview: collides with nothing but the ground
   if marker.ghost then
@@ -6242,7 +7347,10 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
           log('I', logTag, string.format('extra part %d (%s): %d collision triangles sit in the car\'s body - they don\'t push it', i, tostring(ex.part), overlaps))
         end
         -- a hitch (fifth wheel, pintle, tow hitch: nodes with a coupler tag) hangs on its mount
-        -- points only, so its plate tilts / slides and its hook moves as on the donor
+        -- points only, so its plate tilts / slides and its hook moves as on the donor. So does a
+        -- front end (its parts where they were bolted to the donor's body): held whole, a crash
+        -- could not bend its bumper, fenders or hood
+        local isFront = type(ex.frontEnd) == 'table'
         local tags, seenTag, hooks = {}, {}, nil
         for _, n in pairs(vehicle.nodes) do
           if type(n) == 'table' and isPart(n) and type(n.couplerTag) == 'string' and n.couplerTag ~= '' and not seenTag[n.couplerTag] then
@@ -6251,7 +7359,7 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
           end
         end
         local mounts = type(S.extraMounts) == 'table' and S.extraMounts[i]
-        if #tags > 0 and type(mounts) == 'table' then
+        if (#tags > 0 or isFront) and type(mounts) == 'table' then
           hooks = {}
           for _, n in pairs(vehicle.nodes) do
             if type(n) == 'table' and isPart(n) and mounts[n.name] then hooks[#hooks + 1] = n end
@@ -6261,6 +7369,10 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
         if #tags > 0 then
           log('I', logTag, string.format('extra part %d (%s): hitch %s, %s', i, tostring(ex.part), table.concat(tags, ', '),
             hooks and string.format('held at its %d mount points, its moving parts move', #hooks) or 'held rigidly (no mount points of its own found)'))
+        end
+        if isFront then
+          log('I', logTag, string.format('extra part %d (front end of %s): %s', i, tostring(ex.model),
+            hooks and string.format('held at its %d mount points, the rest of it bends and breaks as on the donor', #hooks) or 'held rigidly (no mount points of its own found)'))
         end
         local loose, mass
         ok, res, loose, mass = pcall(S.mountExtra, vehicle, i, ex, isPart, isBody, hooks)
@@ -6595,6 +7707,11 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
 
   -- universal drivetrain last, after every part that adds powertrain devices is in
   local dt = marker.drivetrain
+  if not (type(dt) == 'table' and dt.enabled) and S.cutWheelsGone then
+    -- the cut took driven wheels off: the wheels that stay get driven
+    dt = {enabled = true, layout = 'RWD'}
+    log('I', logTag, 'car cutter: wheels were cut off, the universal drivetrain drives the rest')
+  end
   if type(dt) == 'table' and dt.enabled then
     local ok, res = pcall(buildUniversalDrivetrain, vehicle, dt)
     log(ok and 'I' or 'E', logTag, 'universal drivetrain: ' .. tostring(res))
@@ -6680,13 +7797,58 @@ local function toggleWindow()
   log('I', logTag, 'window ' .. (showWindow[0] and 'opened' or 'closed'))
 end
 
+--------------------------------------------------------------------------------
+-- multiplayer (BeamMP): a preview is a vehicle of its own, so BeamMP sends it to every other
+-- player, whose game spawns it with the game's safe spawn. That places a car by the box of its
+-- colliding nodes, and a preview has none (it collides with nothing): spawn.spawnVehicle returns
+-- nil and BeamMP's spawn queue errors out on it (MPVehicleGE.lua:1538). A preview is spawned
+-- where it is sent instead, as its owner spawns it.
+--------------------------------------------------------------------------------
+
+S.isPreviewConfig = function(cfg)
+  if type(cfg) == 'string' then
+    return cfg:find('partAttacher', 1, true) ~= nil and cfg:find('["ghost"]=true', 1, true) ~= nil
+  end
+  return type(cfg) == 'table' and type(cfg.partAttacher) == 'table' and cfg.partAttacher.ghost == true
+end
+
+S.installSpawnHook = function()
+  local sp = rawget(_G, 'spawn')
+  if type(sp) ~= 'table' or type(sp.spawnVehicle) ~= 'function' or S.origSpawnVehicle then return end
+  S.origSpawnVehicle, S.origSetVehicleObject = sp.spawnVehicle, sp.setVehicleObject
+  sp.spawnVehicle = function(model, partConfig, pos, rot, options)
+    if S.isPreviewConfig(partConfig) then
+      options = options or {}
+      options.safeSpawn = false
+    end
+    return S.origSpawnVehicle(model, partConfig, pos, rot, options)
+  end
+  if type(S.origSetVehicleObject) == 'function' then
+    sp.setVehicleObject = function(veh, options)
+      if type(options) == 'table' and S.isPreviewConfig(options.config) then options.safeSpawn = false end
+      return S.origSetVehicleObject(veh, options)
+    end
+  end
+end
+
+S.removeSpawnHook = function()
+  local sp = rawget(_G, 'spawn')
+  if type(sp) == 'table' and S.origSpawnVehicle then
+    sp.spawnVehicle = S.origSpawnVehicle
+    if S.origSetVehicleObject then sp.setVehicleObject = S.origSetVehicleObject end
+  end
+  S.origSpawnVehicle, S.origSetVehicleObject = nil, nil
+end
+
 local function onExtensionLoaded()
   installLoaderHooks()
+  S.installSpawnHook()
   log('I', logTag, 'Part Attacher ' .. S.version .. ' by Kavencki - Giedrius P. loaded. Ctrl+Shift+Y or partAttacher.toggleWindow()')
 end
 
 local function onExtensionUnloaded()
   removeLoaderHooks()
+  S.removeSpawnHook()
   for _, e in pairs(entries) do
     local ghost = getVeh(e.id)
     if ghost then ghost:delete() end

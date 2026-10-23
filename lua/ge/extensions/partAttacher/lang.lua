@@ -319,5 +319,48 @@ return {
     ['Vaziuojant: TC / ESC rezimai (ESC + TC / TC / Off) - klavisas "Toggle ESC mode" arba radialinis meniu.'] = 'While driving: TC / ESC modes (ESC + TC / TC / Off) - key "Toggle ESC mode" or the radial menu.',
     ['2-step: stovint laikyk stabdi + pilna gaza, atleisk stabdi - startas. Ijungiama meniu / "Toggle Two-Step".'] = '2-step: standing still, hold the brake + full throttle, let go of the brake - launch. Switch it on in the menu / "Toggle Two-Step".',
     ['Line lock: laikyk stabdi, ijunk "Toggle Line Lock" - priekiniai laikomi, galiniai buksuoja.'] = 'Line lock: hold the brake, press "Toggle Line Lock" - the front wheels are held, the rear ones spin.',
+
+    -- 7. car cutter (experimental)
+    ['nupjaunama'] = 'comes off',
+    ['Nepavyko nuskaityti masinos.'] = 'Could not read the vehicle.',
+    ['EKSPERIMENTINE funkcija: gali glitchinti, issisaugok masina pries pjaudamas.'] = 'EXPERIMENTAL: it can glitch, save your vehicle before you cut it.',
+    ['Nupjauk dali savo masinos: kas uz plokstumos, nuimama (ratai, sijos, detales).'] = 'Cut off part of your vehicle: what is beyond the plane comes off (wheels, beams, parts).',
+    ['Per pjuvi einantys modeliai perpjaunami tikrai (pirmas pjuvis uztrunka sekunde). Pridetos detales ir pakeistos pakabos lieka.'] =
+      'Models that cross the cut are really cut (the first cut takes a second). Added parts and swapped suspensions stay.',
+    ['Pjovimo vieta nuo priekio (m)'] = 'Cut position from the front (m)',
+    ['Masinos ilgis: %.2f m'] = 'Vehicle length: %.2f m',
+    ['Palikti PRIEKI'] = 'Keep the FRONT',
+    ['Palikti GALA'] = 'Keep the REAR',
+    ['Rodyti pjovimo plokstuma'] = 'Show the cut plane',
+    ['PJAUTI'] = 'CUT',
+    ['Masina nupjauta %.2f m nuo priekio, lieka %s.'] = 'Vehicle cut %.2f m from the front, the %s stays.',
+    ['Dabar nupjauta %.2f m nuo priekio, liko %s.'] = 'Cut now: %.2f m from the front, the %s stayed.',
+    ['priekis'] = 'front',
+    ['galas'] = 'rear',
+    ['Atkurti visa masina'] = 'Restore the whole vehicle',
+    ['Masina vel visa.'] = 'The vehicle is whole again.',
+    ['Prie pjuvio gali prideti kitos masinos pakaba (Detale, pakabos aplankas) ar detales.'] =
+      "At the cut you can add another vehicle's suspension (Part tab, suspension folder) or parts.",
+    ['Kitos masinos puse prie pjuvio - kitame zingsnyje.'] = "Joining another vehicle's half at the cut comes in the next step.",
+
+    -- 8. front end swap
+    ['Priekis'] = 'Front end',
+    ['7. Priekio swap: visas kitos masinos priekis'] = '7. Front end swap: the whole front of another vehicle',
+    ['Masina (donoras)'] = 'Vehicle (donor)',
+    ['Pasirink masina, kurios prieki nori.'] = 'Pick the vehicle whose front end you want.',
+    ['Sios masinos priekio detaliu nerasta.'] = 'No front end parts found on this vehicle.',
+    ['Priekio detales (%d) - nuimk varneles, ko nereikia:'] = 'Front end parts (%d) - untick what you do not want:',
+    ['Nuimti savo masinos priekio detales'] = "Take my vehicle's own front parts off",
+    ['Tavo buferis, sparnai, kapotas, zibintai, groteles nuimami (Parts meniu), kai prieki pritvirtini; nuemus prieki - grizta.'] =
+      'Your bumper, fenders, hood, lights and grille come off (as in the Parts menu) when you attach the front end; they come back when you remove it.',
+    ['Auto dydis (pagal tavo masinos ploti)'] = "Auto size (to your vehicle's width)",
+    ['Atsiras visas priekis kaip viena perziura - Detale korteleje pastumdyk (X/Y/Z),'] = 'The whole front end appears as one preview - move it in the Part tab (X/Y/Z),',
+    ['pakeisk dydi ir spausk PRITVIRTINTI. Idiegta korteleje ji galima perkelti ar nuimti.'] = 'change its size and press ATTACH. In the Installed tab you can move or remove it.',
+    ['Pasirink bent viena priekio detale.'] = 'Pick at least one front end part.',
+    ['Priekis is %s: %d detales. Detale korteleje pastumdyk, pakeisk dydi ir spausk PRITVIRTINTI.'] =
+      'Front end of %s: %d parts. Move it and set its size in the Part tab, then press ATTACH.',
+    ['Priekis is %s idiegtas (%d detales, %d savu nuimta).'] = 'Front end of %s installed (%d parts, %d of your own taken off).',
+    ['%d. PRIEKIS is %s (%d detales)'] = '%d. FRONT END of %s (%d parts)',
+    ['Priekis nuimamas, tavo masinos savos priekio detales grizta.'] = "The front end comes off, your vehicle's own front parts come back.",
   },
 }
