@@ -1,4 +1,4 @@
--- Part Attacher - mod author: Kavencki - Giedrius P. (c) 2026
+-- Part Attacher Experimental - mod author: Kavencki - Giedrius P. (c) 2026
 -- UI translations. The mod's UI is written in Lithuanian; this table gives the English text for each
 -- Lithuanian one (the key is the text exactly as it is shown). Keys with %s / %d / %.2f ... match
 -- formatted texts: the values in their place are kept (and translated too when they are UI words).
@@ -7,10 +7,17 @@
 return {
   en = {
     -- window
-    ['Part Attacher %s (c) 2026 Kavencki. Visos teises saugomos.'] = 'Part Attacher %s (c) 2026 Kavencki. All rights reserved.',
+    ['Part Attacher Experimental %s (c) 2026 Kavencki. Visos teises saugomos.'] = 'Part Attacher Experimental %s (c) 2026 Kavencki. All rights reserved.',
     ['Masina: %s'] = 'Vehicle: %s',
     ['nera'] = 'none',
     ['1. Pasirinkti detale'] = '1. Pick a part',
+    -- the window's tabs
+    ['Detale'] = 'Part',
+    ['Pozicija'] = 'Position',
+    ['Idiegta'] = 'Installed',
+    ['Pavaros'] = 'Drivetrain',
+    ['Pakaba'] = 'Suspension',
+    ['Elektronika'] = 'Electronics',
     ['2. Pozicija ir tvirtinimas'] = '2. Position and mounting',
     ['3. Idiegtos detales'] = '3. Installed parts',
     ['4. Universalios pavaros (kardanas / diferencialai / pusasiai)'] = '4. Universal drivetrain (driveshaft / differentials / half shafts)',
@@ -22,6 +29,8 @@ return {
     ['Modelis'] = 'Model',
     ['pasirink modeli...'] = 'pick a model...',
     ['Paieska'] = 'Search',
+    ['Priekabos'] = 'Trailers',
+    ['Statiniai objektai (props)'] = 'Static objects (props)',
     ['Ieskoti detales'] = 'Search parts',
     ['Nieko nerasta.'] = 'Nothing found.',
     ['... ir dar %d'] = '... and %d more',
@@ -175,6 +184,7 @@ return {
     ['%s: %s (is %s), vietoj %s'] = '%s: %s (from %s), instead of %s',
     ['%d. %s  (is %s)%s'] = '%d. %s  (from %s)%s',
     ['  [tik modelis]'] = '  [model only]',
+    ['  [tik duomenys]'] = '  [data only]',
     ['Perkelti'] = 'Move',
     ['Nuimti'] = 'Remove',
     ['Grazinti originalu'] = 'Restore original',
@@ -280,6 +290,14 @@ return {
     ['Detale %s neturi savo modelio tasku (modelis kabo ant savo masinos kebulo) - atsiras tik jos modelis, be fizikos.'] =
       "Part %s has no mesh points of its own (its model hangs on its own car's body) - only its model will appear, without physics.",
     ['Si detale neturi modelio (tik duomenys) - nera ka parodyti.'] = 'This part has no model (data only) - nothing to show.',
+    ['%s jau idiegta.'] = '%s is already installed.',
+    ['%s niekur neprisitvirtino (per toli nuo masinos remo ir kebulo) - ji nukris. Perkelk ja arciau arba padidink "Maks. tarpas".'] =
+      '%s found nothing to hold on to (too far from the frame and body of the vehicle) - it will fall. Move it closer or raise "Max gap".',
+    ['%s yra kablys (%s): jis veikia tik su fizika - 2 dalyje spausk "Su fizika".'] =
+      '%s is a hitch (%s): it only works with physics - press "With physics" in section 2.',
+    ['%s: idiegta iskart (tik duomenys, be modelio - nera ka stumdyti).'] = '%s: installed right away (data only, no model - nothing to place).',
+    ['%s neturi kur kaupti: reikia "%s" (pvz. oro bako is tos pacios masinos) - pridek ir ji.'] =
+      '%s has nothing to fill: it needs "%s" (e.g. the air tank of the same vehicle) - add that too.',
     ['Pakabos nustatymai pritaikyti (logic).'] = 'Suspension settings applied (logic).',
     ['Pakaba grazinta i originalia.'] = 'Suspension restored to original.',
     ['Nepavyko nuskaityti sios pakabos spyruokliu / amortizatoriu.'] = 'Could not read the springs / dampers of this suspension.',
@@ -301,5 +319,50 @@ return {
     ['Vaziuojant: TC / ESC rezimai (ESC + TC / TC / Off) - klavisas "Toggle ESC mode" arba radialinis meniu.'] = 'While driving: TC / ESC modes (ESC + TC / TC / Off) - key "Toggle ESC mode" or the radial menu.',
     ['2-step: stovint laikyk stabdi + pilna gaza, atleisk stabdi - startas. Ijungiama meniu / "Toggle Two-Step".'] = '2-step: standing still, hold the brake + full throttle, let go of the brake - launch. Switch it on in the menu / "Toggle Two-Step".',
     ['Line lock: laikyk stabdi, ijunk "Toggle Line Lock" - priekiniai laikomi, galiniai buksuoja.'] = 'Line lock: hold the brake, press "Toggle Line Lock" - the front wheels are held, the rear ones spin.',
+
+    -- 7. car cutter (experimental)
+    ['Pjovimas'] = 'Cut',
+    ['7. Masinos pjovimas (experimental)'] = '7. Car cutter (experimental)',
+    ['nupjaunama'] = 'comes off',
+    ['Nepavyko nuskaityti masinos.'] = 'Could not read the vehicle.',
+    ['EKSPERIMENTINE funkcija: gali glitchinti, issisaugok masina pries pjaudamas.'] = 'EXPERIMENTAL: it can glitch, save your vehicle before you cut it.',
+    ['Nupjauk dali savo masinos: kas uz plokstumos, nuimama (ratai, sijos, detales).'] = 'Cut off part of your vehicle: what is beyond the plane comes off (wheels, beams, parts).',
+    ['Per pjuvi einantys modeliai perpjaunami tikrai (pirmas pjuvis uztrunka sekunde). Pridetos detales ir pakeistos pakabos lieka.'] =
+      'Models that cross the cut are really cut (the first cut takes a second). Added parts and swapped suspensions stay.',
+    ['Pjovimo vieta nuo priekio (m)'] = 'Cut position from the front (m)',
+    ['Masinos ilgis: %.2f m'] = 'Vehicle length: %.2f m',
+    ['Palikti PRIEKI'] = 'Keep the FRONT',
+    ['Palikti GALA'] = 'Keep the REAR',
+    ['Rodyti pjovimo plokstuma'] = 'Show the cut plane',
+    ['PJAUTI'] = 'CUT',
+    ['Masina nupjauta %.2f m nuo priekio, lieka %s.'] = 'Vehicle cut %.2f m from the front, the %s stays.',
+    ['Dabar nupjauta %.2f m nuo priekio, liko %s.'] = 'Cut now: %.2f m from the front, the %s stayed.',
+    ['priekis'] = 'front',
+    ['galas'] = 'rear',
+    ['Atkurti visa masina'] = 'Restore the whole vehicle',
+    ['Masina vel visa.'] = 'The vehicle is whole again.',
+    ['Prie pjuvio gali prideti kitos masinos pakaba (Detale, pakabos aplankas) ar detales.'] =
+      "At the cut you can add another vehicle's suspension (Part tab, suspension folder) or parts.",
+    ['Kitos masinos puse prie pjuvio - kitame zingsnyje.'] = "Joining another vehicle's half at the cut comes in the next step.",
+
+    -- 8. front end swap
+    ['Priekis'] = 'Front end',
+    ['8. Priekio swap: visas kitos masinos priekis'] = '8. Front end swap: the whole front of another vehicle',
+    ['Masina (donoras)'] = 'Vehicle (donor)',
+    ['Pasirink masina, kurios prieki nori.'] = 'Pick the vehicle whose front end you want.',
+    ['Sios masinos priekio detaliu nerasta.'] = 'No front end parts found on this vehicle.',
+    ['Priekio detales (%d) - nuimk varneles, ko nereikia:'] = 'Front end parts (%d) - untick what you do not want:',
+    ['Nuimti savo masinos priekio detales'] = "Take my vehicle's own front parts off",
+    ['Tavo buferis, sparnai, kapotas, zibintai, groteles nuimami (Parts meniu), kai prieki pritvirtini; nuemus prieki - grizta.'] =
+      'Your bumper, fenders, hood, lights and grille come off (as in the Parts menu) when you attach the front end; they come back when you remove it.',
+    ['Auto dydis (pagal tavo masinos ploti)'] = "Auto size (to your vehicle's width)",
+    ['Atsiras visas priekis kaip viena perziura - Detale korteleje pastumdyk (X/Y/Z),'] = 'The whole front end appears as one preview - move it in the Part tab (X/Y/Z),',
+    ['pakeisk dydi ir spausk PRITVIRTINTI. Idiegta korteleje ji galima perkelti ar nuimti.'] = 'change its size and press ATTACH. In the Installed tab you can move or remove it.',
+    ['Pasirink bent viena priekio detale.'] = 'Pick at least one front end part.',
+    ['Priekis is %s: %d detales. Detale korteleje pastumdyk, pakeisk dydi ir spausk PRITVIRTINTI.'] =
+      'Front end of %s: %d parts. Move it and set its size in the Part tab, then press ATTACH.',
+    ['Priekis is %s idiegtas (%d detales, %d savu nuimta).'] = 'Front end of %s installed (%d parts, %d of your own taken off).',
+    ['%d. PRIEKIS is %s (%d detales)'] = '%d. FRONT END of %s (%d parts)',
+    ['Priekis nuimamas, tavo masinos savos priekio detales grizta.'] = "The front end comes off, your vehicle's own front parts come back.",
   },
 }

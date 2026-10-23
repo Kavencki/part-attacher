@@ -1,7 +1,7 @@
 <template>
   <div class="pa-card">
     <div class="pa-header">
-      <div class="pa-title">Part Attacher</div>
+      <div class="pa-title">Part Attacher Experimental</div>
       <div class="pa-version">{{ version }}</div>
     </div>
     <div class="pa-body">
@@ -14,7 +14,7 @@
 </template>
 
 <script setup>
-// Part Attacher - mod author: Kavencki - Giedrius P. (c) 2026
+// Part Attacher Experimental - mod author: Kavencki - Giedrius P. (c) 2026
 // The card of the Mods tab button (index.js): opens the mod's window and closes the pause menu.
 import { ref, computed, onMounted } from "vue"
 import { BngButton, ACCENTS } from "@/common/components/base"
@@ -22,13 +22,13 @@ import { BngButton, ACCENTS } from "@/common/components/base"
 const TEXT = {
   en: {
     desc: "Any part from any vehicle on your vehicle, engine / gearbox / suspension / turbo swaps, universal drivetrain, safety electronics.",
-    open: "OPEN PART ATTACHER",
-    hint: "Opens the window and goes back to driving. Key: Ctrl + Shift + Y.",
+    open: "OPEN PART ATTACHER EXPERIMENTAL",
+    hint: "Opens the window and goes back to driving. Key: Ctrl + Shift + U.",
   },
   lt: {
     desc: "Bet kuri detale is bet kurios masinos ant tavo masinos, variklio / dezes / pakabos / turbo swap'ai, universalios pavaros, saugos elektronika.",
-    open: "ATIDARYTI PART ATTACHER",
-    hint: "Atidaro langa ir grizta i vaziavima. Klavisai: Ctrl + Shift + Y.",
+    open: "ATIDARYTI PART ATTACHER EXPERIMENTAL",
+    hint: "Atidaro langa ir grizta i vaziavima. Klavisai: Ctrl + Shift + U.",
   },
 }
 
@@ -41,15 +41,15 @@ function engineLua(script, cb) {
 }
 
 function open() {
-  engineLua("if not partAttacher then extensions.load('partAttacher') end partAttacher.openFromMenu()")
+  engineLua("if not partAttacherExp then extensions.load('partAttacherExp') end partAttacherExp.openFromMenu()")
 }
 
 onMounted(() => {
   // the window's own language (its Language / Kalba buttons) and version
-  engineLua("partAttacher and partAttacher.getLang and partAttacher.getLang() or 'en'", res => {
+  engineLua("partAttacherExp and partAttacherExp.getLang and partAttacherExp.getLang() or 'en'", res => {
     if (typeof res === "string" && TEXT[res]) lang.value = res
   })
-  engineLua("partAttacher and partAttacher.getVersion and partAttacher.getVersion() or ''", res => {
+  engineLua("partAttacherExp and partAttacherExp.getVersion and partAttacherExp.getVersion() or ''", res => {
     if (typeof res === "string") version.value = res
   })
 })

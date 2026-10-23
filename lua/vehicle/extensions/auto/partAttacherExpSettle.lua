@@ -1,7 +1,7 @@
--- Part Attacher (vehicle side) - mod author: Kavencki - Giedrius P. (c) 2026. settle time after a spawn / reset of a car with swapped parts.
+-- Part Attacher Experimental (vehicle side) - mod author: Kavencki - Giedrius P. (c) 2026. settle time after a spawn / reset of a car with swapped parts.
 -- The GE side loaded every beam unbreakable and undeformable (originals kept in upaDeform /
 -- upaStrength); once the car has settled on its new parts, the original values come back.
--- Loads for every vehicle (extensions/auto) and does nothing on cars without partAttacherSettle.
+-- Loads for every vehicle (extensions/auto) and does nothing on cars without partAttacherExpSettle.
 
 local M = {}
 
@@ -33,11 +33,11 @@ local function restore()
     if deform then obj:setBeamDeform(b.cid, deform) end
     obj:setBeamStrength(b.cid, strength)
   end)
-  log('I', 'partAttacher', 'settle time over, damage back on for ' .. count .. ' beams')
+  log('I', 'partAttacherExp', 'settle time over, damage back on for ' .. count .. ' beams')
 end
 
 local function settleTime()
-  return v.data and tonumber(v.data.partAttacherSettle) or nil
+  return v.data and tonumber(v.data.partAttacherExpSettle) or nil
 end
 
 local function onExtensionLoaded()

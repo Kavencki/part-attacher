@@ -1,8 +1,21 @@
-PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
+PART ATTACHER EXPERIMENTAL - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.0 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.1 experimental MP test
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
+
+EXPERIMENTAL BUILD: a copy of Part Attacher 1.1 with new features to test (now:
+the CAR CUTTER, section 7, and the FRONT END SWAP, section 8). Enable only ONE of
+"Part Attacher" and "Part Attacher Experimental" at a time. Window key: Ctrl +
+Shift + U. Its vehicles save their changes under their own key, so they don't
+load in the normal Part Attacher.
+
+MULTIPLAYER (BeamMP) TEST BUILD: put this zip in the server's Resources/Client
+folder (every player gets it from there) and set MaxCars = 2 or more in
+ServerConfig.toml (a preview is a vehicle of its own). Before joining, disable
+your own local copies of "Part Attacher" and "Part Attacher Experimental" in the
+Mod Manager. The car cutter's cut models are made on the cutting player's PC
+- other players don't have them yet.
 
 
 WHAT IT DOES
@@ -30,10 +43,14 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 
 QUICK START
 -----------
+The window's sections are tabs at its top: Part (sections 1 and 2), Installed
+(3), Drivetrain (4), Suspension (5), Electronics (6), Cut (7), Front end (8). When a preview appears,
+its position (section 2) shows on top of the same Part tab - no other tab needed.
+
 1. Get into the vehicle you want to modify.
-2. Press  Ctrl + Shift + Y  to open the window (rebind it in Options > Controls >
-   Gameplay > "Part Attacher: open / close window"), or press ESC and pick
-   Mods > Part Attacher > "OPEN PART ATTACHER".
+2. Press  Ctrl + Shift + U  to open the window (rebind it in Options > Controls >
+   Gameplay > "Part Attacher Experimental: open / close window"), or press ESC and pick
+   Mods > Part Attacher Experimental > "OPEN PART ATTACHER EXPERIMENTAL".
 3. Section 1: pick the "Model" you want a part FROM. Its parts are shown like
    the game's own Parts menu (slot tree; the default part is marked *), with the
    swap folders on top. Or type in "Search parts".
@@ -58,6 +75,12 @@ SECTION 1 - PICK A PART
 - "Vehicle paint": paint the part in your vehicle's colours.
 - "All parts by type" at the bottom: every part, including common ones and
   other vehicles' parts.
+- Data-only parts (no model and no points of their own, e.g. a truck's "Air
+  Compressor") have no preview: the button puts them straight onto your vehicle.
+  Their devices are connected to your engine (it gets the outputs they need).
+  Section 3 marks them "[data only]"; they can only be removed. A compressor
+  needs an air tank too - add the same vehicle's "Air Tanks", otherwise a
+  message says what is missing.
 
 
 SECTION 2 - POSITION AND MOUNTING
@@ -80,6 +103,12 @@ SECTION 2 - POSITION AND MOUNTING
   body, spread out, sized to the node masses). The part keeps its own weight,
   beams and collisions - a bull bar works as a bull bar. Its links to the
   donor car's body (frame, bumper) are left out, so they can't grab your car.
+- A part far from the car's own body (a fifth wheel on the frame of a swapped
+  semi axle) also hangs on the swapped suspension's frame (its virtual frame,
+  the donor frame it brought) and on parts you added before with physics - the
+  car's body always comes first when it is in reach. Never on the moving parts
+  of a suspension (axles, arms, wheels). If a part reaches nothing at all, a
+  message says it will fall.
 - Weld points (welds per frame point = weld points / 3), Max gap (the frame
   reaches 3x as far, at least 1 m), Strength / Unbreakable, No collisions.
   Strength is per weld beam: it breaks at that force and starts to bend at
@@ -87,6 +116,19 @@ SECTION 2 - POSITION AND MOUNTING
 - "Crash protection for the first 2.5 s": after a spawn / reset nothing bends
   or breaks for 2.5 s while new parts settle, then normal damage returns.
 
+
+HITCHES (fifth wheel, pintle, tow hitch)
+----------------------------------------
+- An attached hitch works like on its own vehicle: the semi's "Fifth Wheel"
+  (us_semi) takes a semi trailer when you back under it, a "Pintle Hitch" and
+  other hitches couple with the game's coupler key (L). Unhitch with the fifth
+  wheel's handle or the radial menu.
+- A hitch hangs on its virtual mount at its own mount points only (its rails,
+  its frame points), so the fifth wheel plate tilts and slides like on the donor.
+  last_load.log says "hitch fifthwheel_v2, held at its N mount points".
+- A hitch only works with physics: a "Model only" part has no coupler point.
+- A heavy trailer pulls through the hitch's welds: if it tears off, raise
+  "Strength" in section 2 or tick "Unbreakable".
 
 ENGINE SWAP  (folder ">> ENGINE SWAP")
 -----------
@@ -154,11 +196,51 @@ shafts) is rebuilt from the real wheel positions:
   driveshaft model is drawn.
 
 
+SECTION 7 - CAR CUTTER (experimental)
+-------------------------------------
+Cut part of your vehicle off at a plane across it:
+- "Cut position from the front (m)": where the plane is (an orange plane on the
+  vehicle shows it, the red arrow points at the side that comes off).
+- "Keep the FRONT" / "Keep the REAR", then CUT. The vehicle reloads.
+- What is beyond the plane comes off: its beams, collisions, wheels and the
+  parts that lie fully beyond it. A wheel goes or stays whole, by its hub.
+- Models that cross the cut (the body shell, the interior) are cut for real:
+  the mod reads the car's model file, removes what is beyond the plane and saves
+  the cut models in BeamNG.drive/current/settings/partAttacherExp/cutmeshes/
+  <model>/<cut>/ in your user folder (the first cut at a spot takes a second or two). The cut
+  is open - you see inside the shell, like a real cut car. A model from a shared
+  folder that can't be cut stays whole, or goes if most of it is beyond the plane.
+  Those files can be deleted any time; the next cut makes them again.
+- The wheels that stay are driven by the universal drivetrain (section 4).
+- Parts you added and swapped suspensions are not cut: add another vehicle's
+  suspension or parts at the cut to finish it. "Restore the whole vehicle"
+  undoes the cut.
+- Next step (not in yet): another vehicle's half joined at the cut.
+- The load log says "car cutter: N nodes of the car beyond y ...".
+
+SECTION 8 - FRONT END SWAP
+--------------------------
+Put the whole front of another vehicle on yours:
+- Pick the donor in "Vehicle (donor)". Its front end parts are listed from its
+  default parts (front bumper, bumper support, fenders, hood, headlights, grille,
+  fog lights, front fascia, radiator support...) - untick what you don't want.
+- "SPAWN FRONT END": all of them appear as ONE preview, each where it sits on
+  its own car, with its own lights and sub parts. It starts centred on your car,
+  its front at your car's front and, with "Auto size", as wide as your car's
+  front. Move it and set its size in the Part tab, then ATTACH.
+- It is installed as one part on one virtual mount. "Take my vehicle's own front
+  parts off" (on by default) empties your bumper, fender, hood, headlight and
+  grille slots, like the Parts menu; removing the front end in the Installed tab
+  puts them back. "Move" turns it back into a preview.
+- It takes damage like on its own car: the mount holds only the points where
+  its parts were bolted to the donor's body, so the bumper, fenders and hood
+  bend and break in a crash. "Strength" in section 2 sets how hard it holds on.
+
 SAVING YOUR VEHICLE
 -------------------
 Use the game's own save (Vehicle Config > Save): everything the mod did -
 parts, swaps, drivetrain, tuning, safety electronics, paint - is saved with the
-vehicle, and it loads on any map. Part Attacher must be enabled when you load
+vehicle, and it loads on any map. Part Attacher Experimental must be enabled when you load
 such a vehicle.
 
 
@@ -185,7 +267,7 @@ At the bottom of the window: "Language / Kalba" - English (default) or Lithuania
 
 TROUBLESHOOTING
 ---------------
-- Every load of a modded vehicle writes  settings/partAttacher/last_load.log
+- Every load of a modded vehicle writes  settings/partAttacherExp/last_load.log
   (what was built, what was left out, which nodes needed more mass). If a
   vehicle explodes or a part hangs loose, that file tells why - please attach it
   to bug reports.

@@ -1,0 +1,3 @@
+{
+"partAttacherExp_toggleWindow": {"cat":"gameplay", "order": 900, "ctx": "tlua", "onDown": "if not partAttacherExp then extensions.load('partAttacherExp') end partAttacherExp.toggleWindow()", "title": "Part Attacher Experimental: open / close window", "desc": "Part Attacher Experimental by Kavencki - any part from any vehicle on any vehicle"}
+}

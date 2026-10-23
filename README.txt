@@ -1,24 +1,40 @@
-PART ATTACHER - bet kokia detale ant bet kokios masinos (BeamNG.drive 0.40)
+PART ATTACHER EXPERIMENTAL - bet kokia detale ant bet kokios masinos (BeamNG.drive 0.40)
 ===========================================================================
-Mod author: Kavencki - Giedrius P.        Versija: 1.0 beta
+Mod author: Kavencki - Giedrius P.        Versija: 1.1 experimental MP test
 English: README_EN.txt
 (c) 2026 Kavencki. Visos teises saugomos. Platinti, perkelti ar skelbti kaip
 savo be autoriaus leidimo draudziama.
+
+EKSPERIMENTINE VERSIJA: Part Attacher 1.1 kopija su naujomis funkcijomis
+bandymams (dabar: MASINOS PJOVIMAS, 7 dalis, ir PRIEKIO SWAP, 8 dalis). Ijunk
+tik VIENA is "Part Attacher" ir "Part Attacher Experimental". Lango klavisai:
+Ctrl + Shift + U. Jos masinos pakeitimus saugo savo rakte, todel paprastame
+Part Attacher jie neuzsikrauna.
+
+MULTIPLAYER (BeamMP) TESTINE VERSIJA: sita zip idek i serverio Resources/Client
+aplanka (is ten ja gauna visi zaidejai) ir ServerConfig.toml nustatyk MaxCars = 2
+ar daugiau (perziura - atskira masina). Pries jungdamasis Mod Manager isjunk
+savo vietines "Part Attacher" ir "Part Attacher Experimental" kopijas. Masinos
+pjovimo perpjauti modeliai sukuriami pjaunancio zaidejo PC - kiti ju dar neturi.
 
 
 KALBA / LANGUAGE
 -----------------
 Lango apacioje "Language / Kalba": English (numatyta) arba Lietuviu.
-Pasirinkimas issaugomas (settings/partAttacher/settings.json).
+Pasirinkimas issaugomas (settings/partAttacherExp/settings.json).
 At the bottom of the window: "Language / Kalba" - English (default) or Lithuanian.
-Vertimai: lua/ge/extensions/partAttacher/lang.lua
+Vertimai: lua/ge/extensions/partAttacherExp/lang.lua
 
 Kaip naudoti
 ------------
+Lango dalys yra korteles (tabs) virsuje: Detale (1 ir 2 dalys), Idiegta (3),
+Pavaros (4), Pakaba (5), Elektronika (6), Pjovimas (7), Priekis (8). Atsiradus perziurai, jos pozicija
+(2 dalis) rodoma toje pacioje Detale korteleje virsuje - nieko spausti nereikia.
+
 1. Isek i masina, ant kurios nori deti detale.
-2. Spausk  Ctrl + Shift + Y  arba ESC > Mods > Part Attacher > "ATIDARYTI PART
-   ATTACHER" (arba konsoleje:  partAttacher.toggleWindow() ).
-   Klavisa galima pakeisti: Options > Controls > Gameplay > "Part Attacher".
+2. Spausk  Ctrl + Shift + U  arba ESC > Mods > Part Attacher Experimental > "ATIDARYTI PART
+   ATTACHER" (arba konsoleje:  partAttacherExp.toggleWindow() ).
+   Klavisa galima pakeisti: Options > Controls > Gameplay > "Part Attacher Experimental".
 3. "Modelis" - pasirink masina, IS KURIOS imsi detale (bet kuri masina ar mod'as).
    Detales suskirstytos aplankais (Front Bumper, Rear Bumper, Hood...). Arba ieskok.
 4. "Sukurti detale" - atsiras PERZIUROS detale, kabanti ore virs tavo masinos.
@@ -98,6 +114,29 @@ TIK MODELIS (be fizikos, "static mesh")
   "Tik modelis" - atvirksciai.
 - 2 dalyje rodomas perziuros rezimas (TIK MODELIS / su fizika) ir mygtukas jam
   pakeisti. Varnele "Tik modelis" 1 dalyje lieka pazymeta, kol jos nenuimi.
+
+KABLIAI (fifth wheel, pintle, tow hitch)
+---------------------------------------
+- Pritvirtintas kablys veikia kaip ant savo masinos: sunkvezimio balnas
+  ("Fifth Wheel", us_semi) prikabina puspriekabe, kai po ja privaziuoji atbulas,
+  "Pintle Hitch" ir kiti kabliai jungiasi zaidimo kablio mygtuku (L).
+  Atkabinti - balno rankena arba radialinis meniu.
+- Kablys laikosi ant virtualaus tvirtinimo tik savo tvirtinimo taskuose (bego,
+  remo vietose), todel balno plokste pasvyra ir slankioja, kaip ant donoro.
+  last_load.log rasoma "hitch fifthwheel_v2, held at its N mount points".
+- Kablys veikia tik su fizika: "Tik modelis" detale kablio tasko neturi.
+- Sunki priekaba tempia per kablio suvirinimus: jei atplysta, pakelk
+  "Stiprumas" 2 dalyje arba pazymek "Nesulauzoma".
+
+TIK DUOMENYS (be modelio)
+-------------------------
+- Detales be savo modelio ir tasku, kurios turi tik duomenis (pvz. sunkvezimio
+  oro kompresorius - "Air Compressor"), perziuros neturi: paspaudus mygtuka jos
+  iskart idiegiamos i masina. Ju irenginiai prijungiami prie tavo variklio
+  (variklis gauna reikiamus isejimus). 3 dalyje pazymetos "[tik duomenys]",
+  jas galima tik nuimti.
+- Kompresoriui reikia oro bako: pridek ir tos pacios masinos "Air Tanks",
+  kitaip ekrane parasoma, ko truksta.
 
 TURBO / KOMPRESORIUS (logic)
 ----------------------------
@@ -215,7 +254,7 @@ MASINOS ISSAUGOJIMAS
   VISKAS, ka padare mod'as - detales, engine / gearbox / pakabos swap'ai,
   universalios pavaros, logic pakaba, tiuningas, saugos elektronika, spalva.
   Uzsikrauna bet kuriame map'e.
-- Svarbu: Part Attacher mod'as turi buti ijungtas (be jo swap'ai neuzsikrauna).
+- Svarbu: Part Attacher Experimental mod'as turi buti ijungtas (be jo swap'ai neuzsikrauna).
 
 SAUGOS ELEKTRONIKA (6 dalis lange)
 ----------------------------------
@@ -249,6 +288,12 @@ Virtualus tvirtinimas (detales su fizika)
 - Detales sijos ir trikampiai i donoro masinos kebula (remas, buferis) ismetami:
   jie nebegali prisikabinti prie tavo masinos tasku tokiais paciais vardais.
 - Detales trikampiai, kurie atsiranda kebulo viduje, kebulo nestumia.
+- Toli nuo kebulo esanti detale (pvz. balnas ant pakeistos sunkvezimio galines
+  pakabos remo) laikosi ir ant pakeistos pakabos remo tasku (jos virtualaus
+  remo, atsinesto donoro remo) bei ant anksciau pridetu detaliu su fizika -
+  pirma visada ant masinos kebulo, jei jis pasiekiamas. Niekada ant pakabos
+  judanciu daliu (asiu, svirciu, ratu). Jei detale niekur nepasiekia, ekrane
+  parasoma, kad ji nukris.
 
 Nustatymai
 ----------
@@ -261,6 +306,47 @@ Nustatymai
   28000 N sijomis). "Nesulauzoma" - niekada.
 - Be susidurimu: detale nesimus su kitomis masinomis (tik dekoracija).
 - Masinos spalva: detale nudazoma tavo masinos spalva.
+
+7 DALIS - MASINOS PJOVIMAS (experimental)
+----------------------------------------
+Nupjauk dali savo masinos per plokstuma skersai jos:
+- "Pjovimo vieta nuo priekio (m)": kur eina plokstuma (ji rodoma oranzine ant
+  masinos, raudona rodykle rodo puse, kuri nuimama).
+- "Palikti PRIEKI" / "Palikti GALA", tada PJAUTI. Masina persikrauna.
+- Kas uz plokstumos, nuimama: sijos, susidurimai, ratai ir detales, kurios visos
+  uz jos. Ratas nuimamas arba lieka visas - pagal jo stebule.
+- Per pjuvi einantys modeliai (kebulas, salonas) perpjaunami tikrai: modas
+  perskaito masinos modelio faila, nuima kas uz plokstumos ir issaugo perpjauta
+  modelius i BeamNG.drive/current/settings/partAttacherExp/cutmeshes/
+  <modelis>/<pjuvis>/ tavo vartotojo aplanke (pirmas pjuvis toje vietoje uztrunka sekunde-dvi).
+  Pjuvis atviras - matosi kebulo vidus, kaip tikrai perpjautos masinos. Bendro
+  aplanko modelis, kurio negalima perpjauti, lieka visas arba nuimamas, jei
+  didesne jo dalis uz plokstumos. Tuos failus galima bet kada istrinti.
+- Likusius ratus suka universalios pavaros (4 dalis).
+- Pridetos detales ir pakeistos pakabos nepjaunamos: prie pjuvio pridek kitos
+  masinos pakaba ar detales. "Atkurti visa masina" atsaukia pjuvi.
+- Kitas zingsnis (dar nera): kitos masinos puse prie pjuvio.
+- last_load.log rasoma "car cutter: N nodes of the car beyond y ...".
+
+8 DALIS - PRIEKIO SWAP
+----------------------
+Uzdek visa kitos masinos prieki ant savo:
+- "Masina (donoras)" pasirink masina. Jos priekio detales surandamos is jos
+  standartiniu detaliu (priekinis buferis, jo atrama, sparnai, kapotas, zibintai,
+  groteles, ruko zibintai, priekio fascia, radiatoriaus atrama...) - nuimk
+  varneles, ko nereikia.
+- "SPAWN FRONT END": visos atsiranda kaip VIENA perziura, kiekviena savo vietoje
+  kaip ant savo masinos, su savo lempomis ir smulkiomis detalemis. Ji pastatoma
+  tavo masinos centre, priekis prie tavo masinos priekio, o su "Auto dydis" -
+  tokio pat plocio kaip tavo masinos priekis. Detale korteleje pastumdyk,
+  pakeisk dydi ir PRITVIRTINK.
+- Idiegiama kaip viena detale ant vieno virtualaus tvirtinimo. "Nuimti savo
+  masinos priekio detales" (ijungta) istustina tavo buferio, sparnu, kapoto,
+  zibintu ir groteliu vietas kaip Parts meniu; nuemus prieki Idiegta korteleje
+  jos grizta. "Perkelti" vel vercia ja perziura.
+- Jis gadinasi kaip ant savo masinos: tvirtinimas laiko tik tas vietas, kur jo
+  detales buvo prisuktos prie donoro kebulo, todel buferis, sparnai ir kapotas
+  avarijoje lankstosi ir lusta. "Stiprumas" 2 dalyje - kaip stipriai laikosi.
 
 Pastabos
 --------
