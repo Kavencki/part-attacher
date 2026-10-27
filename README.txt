@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.2 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.3 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -20,6 +20,9 @@ WHAT IT DOES
   2-step launch control, line lock.
 - FRONT END SWAP: another vehicle's whole front (bumper, fenders, hood, lights,
   grille) on yours in one go.
+- Added exhausts work like real ones (smoke, pops, sound), any number of them.
+- Donor liveries on another car's parts and on a front end swap.
+- Part size per axis (X / Y / Z), typed values beside the sliders, Copy.
 - Works in multiplayer (BeamMP).
 - Everything is saved with the game's own vehicle save and loads on any map.
 - English and Lithuanian UI.
@@ -46,8 +49,8 @@ no other tab needed.
    the game's own Parts menu (slot tree; the default part is marked *), with the
    swap folders on top. Or type in "Search parts".
 4. Press the button at the bottom of section 1: a PREVIEW of the part appears.
-5. Section 2: move / rotate it (X / Y / Z, pitch / roll / yaw; Ctrl+click a
-   slider to type a value), then press ATTACH. Your vehicle reloads with the
+5. Section 2: move / rotate it (X / Y / Z, pitch / roll / yaw; type an exact
+   value in the field next to a slider), then press ATTACH. Your vehicle reloads with the
    part built in.
 6. Section 3 lists everything you added: Move, Remove, Mirror, Restore original,
    and "With physics" / "Model only" to switch an installed part in place.
@@ -77,11 +80,26 @@ SECTION 1 - PICK A PART
 SECTION 2 - POSITION AND MOUNTING
 ---------------------------------
 - Donor position / On the roof / Like my vehicle's part: quick positions.
-- "Size (scale)": make the part smaller or bigger (x0.1 - x5, Ctrl+click to type
-  up to x10). It grows / shrinks around its centre - model and physics both.
-  The preview reloads when you let go of the slider; "Real size" goes back to
-  x1. Section 3 shows the size (e.g. x1.50) and Move / Mirror keep it. Lights
-  and other props on the part keep their own size.
+- "Size (scale)": make the part smaller or bigger (x0.1 - x5 on the slider, up
+  to x10 typed in its field). It grows / shrinks around its centre - model and
+  physics both. "Size per axis X / Y / Z" gives width, length and height a
+  factor each (a wider bumper that is not taller). The preview reloads when you
+  let go of a slider or a field; "Real size" goes back to x1. Section 3 shows
+  the size (e.g. x1.50, or x1.20 / 0.90 / 1.00) and Move / Mirror / Copy keep
+  it. Lights and other props on the part keep their own size.
+- "Copy" (section 2 and section 3): one more of the same part as a new preview,
+  at the very same place, turn and size - move it and ATTACH. In section 3 the
+  installed part stays on the car.
+- Exhaust: an attached exhaust really works - smoke, afterfire pops and the
+  exhaust sound come out of its tips like out of your car's own, for any number
+  of them (two or three different exhausts at once too). The load log says
+  "exhaust on mainEngine".
+- Livery: your car's livery only goes on its own parts - another car's parts and
+  a front end swap have their own meshes, so they can take one of the donor's
+  own liveries instead: "Livery (donor)" in section 2 (preview) and section 7
+  (front end), and a "Livery" button by an installed part in section 3 (the car
+  reloads). Shown only when the donor has liveries. The load log says
+  "livery ... on N meshes".
 - Snorkel: an attached snorkel (or any part with air intake points) really
   works - your engine takes its air through it too and floods only when the
   snorkel's top goes under water as well (also as "Model only"). The load log

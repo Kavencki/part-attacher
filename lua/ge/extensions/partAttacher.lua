@@ -47,7 +47,7 @@ end
 -- UI words themselves). ImGui "##id" endings stay as they are. Results are cached.
 --------------------------------------------------------------------------------
 
-S.version = 'v1.2 beta'
+S.version = 'v1.3 beta'
 S.settingsFile = '/settings/partAttacher/settings.json'
 S.lang = 'en' -- English by default
 pcall(function()
@@ -1050,23 +1050,36 @@ S.buildMeshOnlyPart = function(ioCtx, partName, meshNodes)
   return out, filename
 end
 
--- grow / shrink a part around a point (sc = {factor, x, y, z}): its node positions and its meshes
--- (flexbody pos / scale), before the slot's own rotate / move. Beams get their new lengths at spawn.
+-- grow / shrink a part around a point (sc = {x, y, z factors, pivot x, y, z}; the old {factor,
+-- pivot x, y, z} too): its node positions and its meshes (flexbody pos / scale), before the slot's
+-- own rotate / move. Beams get their new lengths at spawn. Each axis on its own: a mesh turned by
+-- its flexbody rot gets stretched along the car's axes, not its own.
 S.scalePart = function(part, sc)
-  local s = type(sc) == 'table' and tonumber(sc[1])
-  if type(part) ~= 'table' or not s or s <= 0 or math.abs(s - 1) < 1e-4 then return end
-  local p = {tonumber(sc[2]) or 0, tonumber(sc[3]) or 0, tonumber(sc[4]) or 0}
+  if type(part) ~= 'table' or type(sc) ~= 'table' then return end
+  local f, p
+  if sc[6] ~= nil then
+    f = {tonumber(sc[1]) or 1, tonumber(sc[2]) or 1, tonumber(sc[3]) or 1}
+    p = {tonumber(sc[4]) or 0, tonumber(sc[5]) or 0, tonumber(sc[6]) or 0}
+  else
+    local s = tonumber(sc[1]) or 1
+    f = {s, s, s}
+    p = {tonumber(sc[2]) or 0, tonumber(sc[3]) or 0, tonumber(sc[4]) or 0}
+  end
+  if f[1] <= 0 or f[2] <= 0 or f[3] <= 0 then return end
+  if math.abs(f[1] - 1) < 1e-4 and math.abs(f[2] - 1) < 1e-4 and math.abs(f[3] - 1) < 1e-4 then return end
   -- a number, or a jbeam expression / variable ("$=...", "$name") wrapped into a new expression
   local function exprOf(v)
     if type(v) == 'string' and v:sub(1, 1) == '$' then return v:sub(1, 2) == '$=' and v:sub(3) or v end
   end
   local function scaled(v, axis)
+    local s = f[axis]
     local c = p[axis] * (1 - s)
     if type(v) == 'number' then return v * s + c end
     local expr = exprOf(v)
     return expr and string.format('$=(%s)*%.6g+%.6g', expr, s, c) or v
   end
-  local function times(v)
+  local function times(v, axis)
+    local s = f[axis]
     if type(v) == 'number' then return v * s end
     local expr = exprOf(v)
     return expr and string.format('$=(%s)*%.6g', expr, s) or s
@@ -1098,18 +1111,43 @@ S.scalePart = function(part, sc)
           local pos = type(opts.pos) == 'table' and opts.pos or curPos or {}
           local scl = type(opts.scale) == 'table' and opts.scale or curScale or {}
           opts.pos = {x = scaled(pos.x or 0, 1), y = scaled(pos.y or 0, 2), z = scaled(pos.z or 0, 3)}
-          opts.scale = {x = times(scl.x or 1), y = times(scl.y or 1), z = times(scl.z or 1)}
+          opts.scale = {x = times(scl.x or 1, 1), y = times(scl.y or 1, 2), z = times(scl.z or 1, 3)}
         end
       end
     end
   end
 end
 
--- the scale of an installed extra part ({factor, pivot}), nil at its own size
+-- a size as it is kept (ex.scale, preset.scale): a number for the same on every axis, or {x, y, z};
+-- as its three factors
+S.scaleAxes = function(v)
+  if type(v) == 'table' then
+    return tonumber(v.x or v[1]) or 1, tonumber(v.y or v[2]) or 1, tonumber(v.z or v[3]) or 1
+  end
+  local s = tonumber(v) or 1
+  return s, s, s
+end
+
+-- the kept form of three factors: nil at the real size, a number when they are all alike
+S.scaleValue = function(x, y, z)
+  if math.abs(x - 1) < 1e-4 and math.abs(y - 1) < 1e-4 and math.abs(z - 1) < 1e-4 then return nil end
+  if math.abs(x - y) < 1e-4 and math.abs(y - z) < 1e-4 then return x end
+  return {x = x, y = y, z = z}
+end
+
+-- for the Installed list: x1.50, or x1.20 / 0.90 / 1.00 for X / Y / Z
+S.scaleLabel = function(v)
+  local x, y, z = S.scaleAxes(v)
+  if math.abs(x - y) < 1e-4 and math.abs(y - z) < 1e-4 then return string.format('x%.2f', x) end
+  return string.format('x%.2f / %.2f / %.2f', x, y, z)
+end
+
+-- the scale of an installed extra part ({x, y, z factors, pivot x, y, z}), nil at its own size
 S.extraScale = function(ex)
-  local s = type(ex) == 'table' and tonumber(ex.scale)
-  if not s or math.abs(s - 1) < 1e-4 or type(ex.pivot) ~= 'table' then return nil end
-  return {s, ex.pivot[1], ex.pivot[2], ex.pivot[3]}
+  if type(ex) ~= 'table' or type(ex.pivot) ~= 'table' then return nil end
+  local x, y, z = S.scaleAxes(ex.scale)
+  if not S.scaleValue(x, y, z) then return nil end
+  return {x, y, z, ex.pivot[1], ex.pivot[2], ex.pivot[3]}
 end
 
 -- front end swap: a made-up part holding another car's front parts (bumper, fenders, hood, lights...)
@@ -1712,6 +1750,97 @@ S.noteExtraDevices = function(part, idx)
   for _, row in ipairs(part.powertrain) do
     if type(row) == 'table' and type(row[2]) == 'string' and row[1] ~= 'type' then S.extraDevices[row[2]] = idx end
   end
+end
+
+-- an added exhaust: the game follows exhaust beams ("isExhaust") from start nodes (the engine's
+-- exhaust ports, also "isExhaust") and lets the smoke, flames and exhaust sound out where a pipe
+-- ends. An added exhaust came cut off at the donor's engine, so its pipes started nowhere and stayed
+-- dead. Each pipe of it gets a start again - its end nearest the car's engine (or its own start
+-- markers, if it has them) - and its beams count for the car's engine: its tips work like the
+-- car's own, for any number of exhausts.
+S.connectExtraExhausts = function(vehicle, extras)
+  local engine
+  for _, d in pairs(type(vehicle.powertrain) == 'table' and vehicle.powertrain or {}) do
+    if type(d) == 'table' and d.type == 'combustionEngine' and type(d.name) == 'string' and (not engine or d.name == 'mainEngine') then engine = d.name end
+  end
+  if not engine then return 0 end
+  local function added(n) return type(n.name) == 'string' and n.name:find('^upa%d+_') ~= nil end
+  -- where the car's own exhaust starts (else its engine block): a pipe's inlet is its end nearest it
+  local ref, refCount = vec3(0, 0, 0), 0
+  for _, n in pairs(vehicle.nodes) do
+    if type(n) == 'table' and n.pos and n.isExhaust and n.isExhaust ~= '' and not added(n) then
+      ref = ref + n.pos
+      refCount = refCount + 1
+    end
+  end
+  if refCount == 0 then
+    local data = vehicle[engine]
+    for _, cid in pairs(type(data) == 'table' and type(data.torqueReactionNodes_nodes) == 'table' and data.torqueReactionNodes_nodes or {}) do
+      local n = vehicle.nodes[cid]
+      if n and n.pos then
+        ref = ref + n.pos
+        refCount = refCount + 1
+      end
+    end
+  end
+  if refCount > 0 then ref = ref / refCount end
+  local total = 0
+  for i, ex in ipairs(extras) do
+    local prefix = 'upa' .. i .. '_'
+    local function mine(n) return n and type(n.name) == 'string' and n.name:sub(1, #prefix) == prefix end
+    -- its exhaust beams as a graph of pipes
+    local adj, beams = {}, 0
+    for _, b in pairs(type(ex) == 'table' and not ex.meshOnly and vehicle.beams or {}) do
+      if type(b) == 'table' and b.isExhaust and b.isExhaust ~= '' and mine(vehicle.nodes[b.id1]) and mine(vehicle.nodes[b.id2]) then
+        b.isExhaust = engine
+        adj[b.id1] = adj[b.id1] or {}
+        adj[b.id2] = adj[b.id2] or {}
+        table.insert(adj[b.id1], b.id2)
+        table.insert(adj[b.id2], b.id1)
+        beams = beams + 1
+      end
+    end
+    local pipes = 0
+    local seen = {}
+    for cid, _ in pairs(adj) do
+      if not seen[cid] then
+        seen[cid] = true
+        local stack, ends, marked = {cid}, {}, false
+        while #stack > 0 do
+          local c = table.remove(stack)
+          local n = vehicle.nodes[c]
+          if n.isExhaust and n.isExhaust ~= '' then
+            n.isExhaust = engine
+            marked = true
+          end
+          if #adj[c] == 1 then ends[#ends + 1] = c end
+          for _, o in ipairs(adj[c]) do
+            if not seen[o] then
+              seen[o] = true
+              stack[#stack + 1] = o
+            end
+          end
+        end
+        if not marked and #ends >= 2 then
+          local best, bestD
+          for _, c in ipairs(ends) do
+            local p = vehicle.nodes[c].pos
+            local d = refCount > 0 and p:distance(ref) or p.y -- no engine point: the front-most end
+            if not bestD or d < bestD then best, bestD = c, d end
+          end
+          vehicle.nodes[best].isExhaust = engine
+          marked = true
+        end
+        if marked then pipes = pipes + 1 end
+      end
+    end
+    if pipes > 0 then
+      log('I', logTag, string.format('extra part %d (%s): exhaust on %s (%d pipes, %d exhaust beams) - its tips smoke, pop and sound like the car\'s own',
+        i, tostring(ex.part), engine, pipes, beams))
+      total = total + pipes
+    end
+  end
+  return total
 end
 
 -- devices of added parts that hang on an engine (a truck's air compressor on its engine's 3rd
@@ -3975,7 +4104,7 @@ local function mergeIntoTarget(e)
     move = {off.x, off.y, off.z},
     rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
     pivot = {e.pivot.x, e.pivot.y, e.pivot.z},
-    scale = e.builtScale ~= 1 and e.builtScale or nil,
+    scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
     welds = math.max(1, S.maxWeldsPtr[0]),
     maxGap = S.maxGapPtr[0],
     strength = S.unbreakablePtr[0] and -1 or math.max(1000, S.strengthPtr[0]),
@@ -3983,6 +4112,7 @@ local function mergeIntoTarget(e)
     meshOnly = meshOnly or nil,
     meshNodes = meshOnly and e.meshNodes or nil,
     frontEnd = frontEnd,
+    skin = e.skin,
   })
 
   deleteEntry(e)
@@ -4032,11 +4162,16 @@ local function registerEntry(id, partName, model, target, preset)
     autoMove = preset and preset.auto and preset.move,
     off = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
     rot = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
-    -- size: the slider, and the factor the preview was built with (only that one gets attached)
     frontEnd = preset and type(preset.frontEnd) == 'table' and preset.frontEnd or nil,
-    builtScale = preset and S.extraScale(preset) and tonumber(preset.scale) or 1,
+    skin = preset and type(preset.skin) == 'string' and preset.skin or nil,
+    -- size: the factors the preview was built with ({x, y, z}; only those get attached) and the
+    -- sliders (one for all axes, or one per axis)
+    builtScale = preset and S.extraScale(preset) and {S.scaleAxes(preset.scale)} or {1, 1, 1},
   }
-  e.scale = im.FloatPtr(e.builtScale)
+  local b = e.builtScale
+  e.scale = im.FloatPtr(b[1])
+  e.scaleAxis = {im.FloatPtr(b[1]), im.FloatPtr(b[2]), im.FloatPtr(b[3])}
+  e.perAxisPtr = im.BoolPtr(math.abs(b[1] - b[2]) > 1e-4 or math.abs(b[2] - b[3]) > 1e-4)
   if preset then
     for i = 1, 3 do
       e.off[i][0] = preset.move and preset.move[i] or 0
@@ -4058,6 +4193,8 @@ local function spawnGhost(model, partName, target, preset)
   -- (a front end too: its pieces - bumper, fenders, hood - would fall apart)
   local frontEnd = type(preset) == 'table' and type(preset.frontEnd) == 'table' and preset.frontEnd or nil
   local config = {mainPartName = partName, partAttacher = {ghost = true, model = model, rigid = (type(preset) == 'table' and preset.mode == 'partswap') or frontEnd ~= nil, frontEnd = frontEnd}}
+  -- a donor livery on the preview's meshes (S.applyPartSkins)
+  config.partAttacher.skin = type(preset) == 'table' and type(preset.skin) == 'string' and preset.skin or nil
   if type(preset) == 'table' and preset.mode == 'meshonly' then config.partAttacher.meshOnly = {nodes = preset.meshNodes} end
   -- a scaled part: the preview is built at that size (around the pivot the part keeps)
   config.partAttacher.scale = type(preset) == 'table' and S.extraScale(preset) or nil
@@ -4563,7 +4700,7 @@ S.spawnMirror = function(target, model, partName, move, rot, pivot, meshOnly, sc
   move, rot = move or {0, 0, 0}, rot or {0, 0, 0}
   local counterpart = S.counterpartName(model, partName)
   local part = counterpart or partName
-  local preset = {rot = {rot[1], -rot[2], -rot[3]}, scale = pivot and tonumber(scale) or nil}
+  local preset = {rot = {rot[1], -rot[2], -rot[3]}, scale = pivot and scale or nil}
   local meshNodes = meshOnly and S.meshNodesFor(model, part) or nil
   if counterpart then
     preset.move = {-move[1], move[2], move[3]}
@@ -4579,7 +4716,10 @@ S.spawnMirror = function(target, model, partName, move, rot, pivot, meshOnly, sc
       c0 = rawNodeCentroid(model, part) or vec3()
     end
     local pv = pivot and vec3(pivot[1], pivot[2], pivot[3]) or c0
-    c0 = pv + (c0 - pv) * (preset.scale or 1) -- the middle of the scaled part
+    -- the middle of the scaled part (each axis by its own factor)
+    local sx, sy, sz = S.scaleAxes(preset.scale)
+    local d = c0 - pv
+    c0 = pv + vec3(d.x * sx, d.y * sy, d.z * sz)
     local mv = vec3(move[1], move[2], move[3])
     local center = eulerToQuat(rot[1], rot[2], rot[3]) * (c0 - pv) + pv + mv
     local target2 = vec3(-center.x, center.y, center.z)
@@ -4911,13 +5051,123 @@ end
 -- the made-up front end part's name for a donor
 S.frontEndName = function(model) return 'upa_frontend_' .. tostring(model) end
 
+-- liveries of a donor (its "paint_design" parts): {skin = its global skin name, label}. A car's
+-- livery switches its own materials to their "<material>.skin.<name>" versions; a donor's part
+-- has none of those for the car's livery, so it gets its own donor livery (S.applyPartSkins).
+S.donorSkins = function(model)
+  S.skinListCache = S.skinListCache or {}
+  if S.skinListCache[model] then return S.skinListCache[model] end
+  local list, seen = {}, {}
+  local okCtx, ioCtx = pcall(jbeamIO.startLoading, modelDirs(model))
+  local okMap, map = false, nil
+  if okCtx then okMap, map = pcall(jbeamIO.getAvailableSlotNameMap, ioCtx) end
+  for _, name in ipairs(okMap and type(map) == 'table' and type(map.paint_design) == 'table' and map.paint_design or {}) do
+    local okP, part = pcall(origGetPart, ioCtx, name)
+    local skin = okP and type(part) == 'table' and (part.skinName or part.globalSkin)
+    if type(skin) == 'string' and skin ~= '' and not seen[skin] then
+      seen[skin] = true
+      local info = type(part.information) == 'table' and part.information.name
+      list[#list + 1] = {skin = skin, label = type(info) == 'string' and info or skin}
+    end
+  end
+  table.sort(list, function(a, b) return a.label:lower() < b.label:lower() end)
+  S.skinListCache[model] = list
+  return list
+end
+
+-- the donor's materials of that livery, as {material, its livery version} pairs
+S.skinOverrides = function(model, skin)
+  S.skinMatCache = S.skinMatCache or {}
+  local key = tostring(model) .. '|' .. tostring(skin)
+  if S.skinMatCache[key] then return S.skinMatCache[key] end
+  local list, seen = {}, {}
+  local suffix = '.skin.' .. tostring(skin)
+  for _, path in ipairs(FS:findFiles('/vehicles/' .. tostring(model) .. '/', '*materials.json', -1, true, false) or {}) do
+    local okJ, data = pcall(jsonReadFile, path)
+    for k, v in pairs(okJ and type(data) == 'table' and data or {}) do
+      local name = type(v) == 'table' and type(v.name) == 'string' and v.name or k
+      if type(name) == 'string' and #name > #suffix and name:sub(-#suffix) == suffix then
+        local base = name:sub(1, #name - #suffix)
+        if not seen[base] then
+          seen[base] = true
+          list[#list + 1] = {base, name}
+        end
+      end
+    end
+  end
+  S.skinMatCache[key] = list
+  return list
+end
+
+-- the donor liveries picked for a preview (all its meshes) or for added parts (their meshes),
+-- as material overrides on those meshes: the car keeps its own livery
+S.applyPartSkins = function(vehicle, marker)
+  local function addTo(fb, overrides)
+    local list = type(fb.materialOverride) == 'table' and fb.materialOverride or {}
+    if #list == 2 and type(list[1]) == 'string' then list = {list} end
+    for _, o in ipairs(overrides) do list[#list + 1] = {o[1], o[2]} end
+    fb.materialOverride = list
+  end
+  local flexbodies = type(vehicle.flexbodies) == 'table' and vehicle.flexbodies or {}
+  if marker.ghost then
+    if type(marker.skin) ~= 'string' then return end
+    local overrides = S.skinOverrides(marker.model, marker.skin)
+    if #overrides == 0 then return end
+    for _, fb in pairs(flexbodies) do
+      if type(fb) == 'table' then addTo(fb, overrides) end
+    end
+    return
+  end
+  for i, ex in ipairs(type(marker.extraParts) == 'table' and marker.extraParts or {}) do
+    if type(ex) == 'table' and type(ex.skin) == 'string' then
+      local overrides = S.skinOverrides(ex.model, ex.skin)
+      local prefix = 'upa' .. i .. '_'
+      local meshes = 0
+      for _, fb in pairs(flexbodies) do
+        local first = type(fb) == 'table' and type(fb._group_nodes) == 'table' and vehicle.nodes[fb._group_nodes[1]]
+        if first and type(first.name) == 'string' and first.name:sub(1, #prefix) == prefix then
+          addTo(fb, overrides)
+          meshes = meshes + 1
+        end
+      end
+      log('I', logTag, string.format('extra part %d (%s): livery %s of %s on %d meshes (%d materials)', i, tostring(ex.part), ex.skin, tostring(ex.model), meshes, #overrides))
+    end
+  end
+end
+
+-- a combo of the donor's liveries (nothing when it has none); onPick(skin or nil) on a new pick
+S.drawSkinPicker = function(id, model, current, onPick)
+  local skins = S.donorSkins(model)
+  if #skins == 0 then return end
+  local shown = L('Be livery')
+  for _, s in ipairs(skins) do
+    if s.skin == current then shown = s.label end
+  end
+  if im.BeginCombo('Livery (donoro)##' .. id, shown) then
+    if im.Selectable1('Be livery##' .. id .. 'none', current == nil) and current ~= nil then onPick(nil) end
+    for _, s in ipairs(skins) do
+      if ui_imgui.Selectable1(s.label .. '##' .. id .. s.skin, s.skin == current) and s.skin ~= current then onPick(s.skin) end
+    end
+    im.EndCombo()
+  end
+  if im.IsItemHovered() then im.SetTooltip('Tavo masinos livery netinka kitos masinos detalems - jos gauna savo masinos livery.') end
+end
+
+-- an installed part's donor livery changed in place
+S.setExtraSkin = function(target, index, skin)
+  local extras = deepcopy(getExtras(target:getID()))
+  if not extras[index] then return end
+  extras[index].skin = skin
+  respawnWithExtras(target, extras)
+end
+
 -- the preview: centred on the car, its front at the car's front, its bottom at the car's front
 -- bottom, and (autoScale) as wide as the car's own front end
-S.spawnFrontEnd = function(target, model, parts, removeOwn, autoScale)
+S.spawnFrontEnd = function(target, model, parts, removeOwn, autoScale, skin)
   if #parts == 0 then msg('Pasirink bent viena priekio detale.', 5) return end
   local spec = {parts = {}, removeOwn = removeOwn or nil}
   for _, p in ipairs(parts) do spec.parts[#spec.parts + 1] = {name = p.name, offset = p.offset} end
-  local preset = {mode = 'part', frontEnd = spec, rot = {0, 0, 0}, move = {0, 0, 0}}
+  local preset = {mode = 'part', frontEnd = spec, rot = {0, 0, 0}, move = {0, 0, 0}, skin = skin}
   local dLo, dHi = S.donorFrontBounds(model, parts)
   local tLo, tHi = S.targetFrontBounds(target)
   if dLo then
@@ -5011,8 +5261,13 @@ S.respawnGhost = function(e, meshOnly)
     move = {e.off[1][0], e.off[2][0], e.off[3][0]},
     rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
     pivot = {e.pivot.x, e.pivot.y, e.pivot.z},
-    scale = math.max(0.05, e.scale[0]),
+    skin = e.skin,
   }
+  if e.perAxisPtr[0] then
+    preset.scale = S.scaleValue(e.scaleAxis[1][0], e.scaleAxis[2][0], e.scaleAxis[3][0])
+  else
+    preset.scale = S.scaleValue(e.scale[0], e.scale[0], e.scale[0])
+  end
   if meshOnly == nil then meshOnly = e.mode == 'meshonly' end
   if e.frontEnd then
     -- a front end is never a model only part
@@ -5040,6 +5295,36 @@ local function editExtra(target, index)
   if ex.meshOnly then preset.mode = 'meshonly' end
   removeExtra(target, index)
   spawnGhost(ex.model, ex.part, target, preset)
+end
+
+-- a copy of an installed part as a new preview, right where the part is (same place, turn and
+-- size); the part itself stays on the car
+S.copyExtra = function(target, index)
+  local ex = getExtras(target:getID())[index]
+  if not ex then return end
+  local preset = deepcopy(ex)
+  preset.mode = ex.meshOnly and 'meshonly' or 'part'
+  if type(preset.frontEnd) == 'table' then preset.frontEnd.replaced = nil end
+  spawnGhost(ex.model, ex.part, target, preset)
+  msg('Kopija atsirado toje pacioje vietoje - pastumdyk ja ir PRITVIRTINK.', 5)
+end
+
+-- a copy of a preview: one more preview of the same part, at the same place, turn and size
+S.copyPreview = function(e)
+  local target = getVeh(e.targetId)
+  if not target then return end
+  local preset = {
+    mode = e.mode,
+    meshNodes = e.meshNodes,
+    frontEnd = e.frontEnd,
+    skin = e.skin,
+    move = {e.off[1][0], e.off[2][0], e.off[3][0]},
+    rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
+    pivot = e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z} or nil,
+    scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
+  }
+  spawnGhost(e.model, e.partName, target, preset)
+  msg('Kopija atsirado toje pacioje vietoje - pastumdyk ja ir PRITVIRTINK.', 5)
 end
 
 local function removeSwap(target)
@@ -5604,18 +5889,52 @@ local function drawSpawnSection(player)
 end
 
 -- [-][+] [=====slider=====] label ; Ctrl+click on the slider lets you type a value
+-- the number part of a slider format ("%.3f m" -> "%.3f") for its typing field
+S.numberFormat = function(fmt)
+  return type(fmt) == 'string' and fmt:match('%%[%-%+ #0]*%d*%.?%d*f') or '%.3f'
+end
+
+-- [-][+] [=====slider=====] [number] label ; the number field takes a typed value (also beyond
+-- the slider's range)
 local function sliderRow(label, ptr, step, minV, maxV, fmt)
   im.PushID1(label)
   if im.SmallButton('-') then ptr[0] = ptr[0] - step end
   im.SameLine()
   if im.SmallButton('+') then ptr[0] = ptr[0] + step end
   im.SameLine()
-  im.PushItemWidth(-130)
+  im.PushItemWidth(-210)
   im.SliderFloat('##v', ptr, minV, maxV, fmt)
+  im.PopItemWidth()
+  im.SameLine()
+  im.PushItemWidth(72)
+  im.InputFloat('##n', ptr, 0, 0, S.numberFormat(fmt))
   im.PopItemWidth()
   im.SameLine()
   im.PopID()
   imText(label)
+end
+
+-- a size row like sliderRow; true once a new size is set (-/+, the slider or the field let go)
+S.scaleRow = function(label, ptr)
+  local apply = false
+  im.PushID1('scale_' .. label)
+  if im.SmallButton('-') then ptr[0] = ptr[0] - 0.1 apply = true end
+  im.SameLine()
+  if im.SmallButton('+') then ptr[0] = ptr[0] + 0.1 apply = true end
+  im.SameLine()
+  im.PushItemWidth(-210)
+  im.SliderFloat('##v', ptr, 0.1, 5, 'x%.2f')
+  if im.IsItemDeactivatedAfterEdit() then apply = true end
+  im.PopItemWidth()
+  im.SameLine()
+  im.PushItemWidth(72)
+  im.InputFloat('##n', ptr, 0, 0, '%.2f')
+  if im.IsItemDeactivatedAfterEdit() then apply = true end
+  im.PopItemWidth()
+  im.SameLine()
+  im.PopID()
+  imText(label)
+  return apply
 end
 
 local function drawGhostSection()
@@ -5662,7 +5981,7 @@ local function drawGhostSection()
     if player and player:getID() ~= e.id and setupTarget(e, player) then msg('Taikinys pakeistas.') end
   end
 
-  imText('Pozicija masinos atzvilgiu (-Y = pirmyn). Ctrl+click ant slankiklio = ivesti skaiciu')
+  imText('Pozicija masinos atzvilgiu (-Y = pirmyn). Tiksli reiksme - irasyk laukelyje desineje')
   im.PushItemWidth(120)
   im.InputFloat('+/- zingsnis (m)', S.stepPtr, 0.01, 0.1, '%.3f')
   im.PopItemWidth()
@@ -5674,28 +5993,49 @@ local function drawGhostSection()
   sliderRow('Pokrypis (Y)', e.rot[2], 5, -180, 180, '%.1f deg')
   sliderRow('Pasukimas (Z)', e.rot[3], 5, -180, 180, '%.1f deg')
   if e.mode == 'part' or e.mode == 'meshonly' then
-    -- size: the preview is built again at the new size once the slider is let go
+    -- size: one factor for all axes, or one per axis (width X, length Y, height Z); the preview is
+    -- built again at the new size once a slider / field is let go
     local apply = false
-    im.PushID1('scale')
-    if im.SmallButton('-') then e.scale[0] = e.scale[0] - 0.1 apply = true end
-    im.SameLine()
-    if im.SmallButton('+') then e.scale[0] = e.scale[0] + 0.1 apply = true end
-    im.SameLine()
-    im.PushItemWidth(-130)
-    im.SliderFloat('##v', e.scale, 0.1, 5, 'x%.2f')
-    if im.IsItemDeactivatedAfterEdit() then apply = true end
-    im.PopItemWidth()
-    im.SameLine()
-    im.PopID()
-    imText('Dydis (scale)')
-    if im.IsItemHovered() then im.SetTooltip('Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.') end
-    if e.builtScale ~= 1 then
-      im.SameLine()
-      if im.SmallButton('Tikras dydis') then e.scale[0] = 1 apply = true end
+    if im.Checkbox('Dydis atskirai X / Y / Z', e.perAxisPtr) then
+      if e.perAxisPtr[0] then
+        for i = 1, 3 do e.scaleAxis[i][0] = e.scale[0] end
+      else
+        e.scale[0] = e.scaleAxis[1][0]
+        apply = true
+      end
+    end
+    if im.IsItemHovered() then im.SetTooltip('Plotis, ilgis ir aukstis atskirai (pvz. platesnis buferis, ne aukstesnis).') end
+    if e.perAxisPtr[0] then
+      if S.scaleRow('Plotis (X)', e.scaleAxis[1]) then apply = true end
+      if S.scaleRow('Ilgis (Y)', e.scaleAxis[2]) then apply = true end
+      if S.scaleRow('Aukstis (Z)', e.scaleAxis[3]) then apply = true end
+    else
+      if S.scaleRow('Dydis (scale)', e.scale) then apply = true end
+      if im.IsItemHovered() then im.SetTooltip('Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.') end
+    end
+    local b = e.builtScale
+    if math.abs(b[1] - 1) > 1e-4 or math.abs(b[2] - 1) > 1e-4 or math.abs(b[3] - 1) > 1e-4 then
+      if im.SmallButton('Tikras dydis') then
+        e.scale[0] = 1
+        for i = 1, 3 do e.scaleAxis[i][0] = 1 end
+        apply = true
+      end
     end
     e.scale[0] = math.min(10, math.max(0.05, e.scale[0]))
-    if apply and math.abs(e.scale[0] - e.builtScale) > 1e-3 then
+    for i = 1, 3 do e.scaleAxis[i][0] = math.min(10, math.max(0.05, e.scaleAxis[i][0])) end
+    local want = e.perAxisPtr[0] and {e.scaleAxis[1][0], e.scaleAxis[2][0], e.scaleAxis[3][0]} or {e.scale[0], e.scale[0], e.scale[0]}
+    if apply and (math.abs(want[1] - b[1]) > 1e-3 or math.abs(want[2] - b[2]) > 1e-3 or math.abs(want[3] - b[3]) > 1e-3) then
       S.rescaleGhost(e)
+      return
+    end
+  end
+  if e.mode == 'part' or e.mode == 'meshonly' then
+    -- a donor livery: the preview is built again with it
+    local picked
+    S.drawSkinPicker('ghost' .. e.id, e.model, e.skin, function(skin) picked = {skin = skin} end)
+    if picked then
+      e.skin = picked.skin
+      S.respawnGhost(e, nil)
       return
     end
   end
@@ -5724,9 +6064,12 @@ local function drawGhostSection()
     if im.Button('Veidrodine kopija') then
       local target = getVeh(e.targetId)
       S.spawnMirror(target, e.model, e.partName, {e.off[1][0], e.off[2][0], e.off[3][0]}, {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
-        e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z}, e.mode == 'meshonly', e.builtScale)
+        e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z}, e.mode == 'meshonly', S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]))
     end
     if im.IsItemHovered() then im.SetTooltip('Atsiras tokia pati detale kitoje masinos puseje (kaire <-> desine), veidrodiskai.') end
+    im.SameLine()
+    if im.Button('Kopija') then S.copyPreview(e) end
+    if im.IsItemHovered() then im.SetTooltip('Dar viena tokia pati detale toje pacioje vietoje (ta pati padetis ir dydis) - pastumdyk ja ir PRITVIRTINK.') end
   end
 
   im.Separator()
@@ -5860,11 +6203,26 @@ local function drawInstalledSection(player)
     else
       if S.extraScale(ex) then
         im.SameLine()
-        imText(string.format('x%.2f', ex.scale))
+        imText(S.scaleLabel(ex.scale))
       end
       im.SameLine()
       if im.SmallButton('Perkelti') then editExtra(player, i) end
       if im.IsItemHovered() then im.SetTooltip('Nuima detale ir vel leidzia ja stumdyti') end
+      im.SameLine()
+      if im.SmallButton('Kopija') then S.copyExtra(player, i) end
+      if im.IsItemHovered() then im.SetTooltip('Tokia pati detale kaip perziura toje pacioje vietoje; si lieka ant masinos.') end
+      -- its own car's livery (the car's livery has nothing for another car's meshes)
+      if #S.donorSkins(ex.model) > 0 then
+        im.SameLine()
+        if im.SmallButton('Livery') then im.OpenPopup('##skinpop' .. i) end
+        if im.BeginPopup('##skinpop' .. i) then
+          if im.Selectable1('Be livery##exskinnone', ex.skin == nil) and ex.skin ~= nil then S.setExtraSkin(player, i, nil) end
+          for _, s in ipairs(S.donorSkins(ex.model)) do
+            if ui_imgui.Selectable1(s.label .. '##exskin' .. s.skin, s.skin == ex.skin) and s.skin ~= ex.skin then S.setExtraSkin(player, i, s.skin) end
+          end
+          im.EndPopup()
+        end
+      end
       im.SameLine()
       if im.SmallButton('Nuimti') then removeExtra(player, i) end
       if isFront and im.IsItemHovered() then im.SetTooltip('Priekis nuimamas, tavo masinos savos priekio detales grizta.') end
@@ -6353,6 +6711,7 @@ S.drawFrontSection = function(player)
     local okF, list = pcall(S.findFrontParts, S.feModel)
     if not okF then log('E', logTag, 'front end parts of ' .. tostring(S.feModel) .. ': ' .. tostring(list)) end
     S.feParts = {model = S.feModel, list = okF and list or {}, on = {}}
+    S.feSkin = nil
     for i = 1, #S.feParts.list do S.feParts.on[i] = im.BoolPtr(true) end
   end
   local list = S.feParts.list
@@ -6370,12 +6729,13 @@ S.drawFrontSection = function(player)
   im.Checkbox('Nuimti savo masinos priekio detales', S.feRemovePtr)
   if im.IsItemHovered() then im.SetTooltip('Tavo buferis, sparnai, kapotas, zibintai, groteles nuimami (Parts meniu), kai prieki pritvirtini; nuemus prieki - grizta.') end
   im.Checkbox('Auto dydis (pagal tavo masinos ploti)', S.feAutoScalePtr)
+  S.drawSkinPicker('fe', S.feModel, S.feSkin, function(skin) S.feSkin = skin end)
   if S.primaryButton('SPAWN FRONT END##fespawn', im.ImVec2(-1, 0)) then
     local picked = {}
     for i, p in ipairs(list) do
       if S.feParts.on[i][0] then picked[#picked + 1] = p end
     end
-    S.spawnFrontEnd(player, S.feModel, picked, S.feRemovePtr[0], S.feAutoScalePtr[0])
+    S.spawnFrontEnd(player, S.feModel, picked, S.feRemovePtr[0], S.feAutoScalePtr[0], S.feSkin)
   end
   imText('Atsiras visas priekis kaip viena perziura - Detale korteleje pastumdyk (X/Y/Z),')
   imText('pakeisk dydi ir spausk PRITVIRTINTI. Idiegta korteleje ji galima perkelti ar nuimti.')
@@ -7196,6 +7556,9 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
   -- the donors' glowMap entries their parts' meshes need (else e.g. a brake disc has no texture)
   local okG, errG = pcall(S.addDonorGlowMaps, vehicle, marker)
   if not okG then log('E', logTag, 'adding the donor glow maps failed: ' .. tostring(errG)) end
+  -- the donor liveries picked for a preview or for added parts
+  local okS, errS = pcall(S.applyPartSkins, vehicle, marker)
+  if not okS then log('E', logTag, 'putting the donor liveries on failed: ' .. tostring(errS)) end
 
   -- a slidenode on a rail the vehicle doesn't have would get rail id -1 and blow the physics up (a
   -- donor part's rail lives on the donor's frame; a preview has no frame at all)
@@ -7394,6 +7757,8 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
     if not okI then log('E', logTag, 'connecting air intakes failed: ' .. tostring(errI)) end
     local okD, errD = pcall(S.connectExtraDevices, vehicle)
     if not okD then log('E', logTag, 'connecting the devices of added parts failed: ' .. tostring(errD)) end
+    local okX, errX = pcall(S.connectExtraExhausts, vehicle, marker.extraParts)
+    if not okX then log('E', logTag, 'connecting the added exhausts failed: ' .. tostring(errX)) end
   end
 
   -- logic engine swap (v3): only the data changes, the car's engine physics stay as they are

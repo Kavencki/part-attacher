@@ -119,8 +119,8 @@ return {
     ['Laikyti ore'] = 'Hold in the air',
     ['Taikinys = dabartine masina'] = 'Target = current vehicle',
     ['Taikinys pakeistas.'] = 'Target changed.',
-    ['Pozicija masinos atzvilgiu (-Y = pirmyn). Ctrl+click ant slankiklio = ivesti skaiciu'] =
-      'Position relative to the vehicle (-Y = forward). Ctrl+click on a slider = type a value',
+    ['Pozicija masinos atzvilgiu (-Y = pirmyn). Tiksli reiksme - irasyk laukelyje desineje'] =
+      'Position relative to the vehicle (-Y = forward). For an exact value type it in the field on the right',
     ['+/- zingsnis (m)'] = '+/- step (m)',
     ['X (sonas)'] = 'X (side)',
     ['Y (pirmyn/atgal)'] = 'Y (forward / back)',
@@ -131,6 +131,21 @@ return {
     ['Dydis (scale)'] = 'Size (scale)',
     ['Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.'] = 'The part grows / shrinks around its centre (model and physics). The preview reloads when you let go of the slider.',
     ['Tikras dydis'] = 'Real size',
+    ['Dydis atskirai X / Y / Z'] = 'Size per axis X / Y / Z',
+    ['Plotis, ilgis ir aukstis atskirai (pvz. platesnis buferis, ne aukstesnis).'] = 'Width, length and height on their own (e.g. a wider bumper, not a taller one).',
+    ['Plotis (X)'] = 'Width (X)',
+    ['Ilgis (Y)'] = 'Length (Y)',
+    ['Aukstis (Z)'] = 'Height (Z)',
+    ['Kopija'] = 'Copy',
+    ['Dar viena tokia pati detale toje pacioje vietoje (ta pati padetis ir dydis) - pastumdyk ja ir PRITVIRTINK.'] =
+      'One more of the same part at the same place (same position and size) - move it and ATTACH.',
+    ['Tokia pati detale kaip perziura toje pacioje vietoje; si lieka ant masinos.'] = 'The same part as a preview at the same place; this one stays on the vehicle.',
+    ['Kopija atsirado toje pacioje vietoje - pastumdyk ja ir PRITVIRTINK.'] = 'The copy is at the same place - move it and ATTACH.',
+    ['Livery'] = 'Livery',
+    ['Be livery'] = 'No livery',
+    ['Livery (donoro)'] = 'Livery (donor)',
+    ['Tavo masinos livery netinka kitos masinos detalems - jos gauna savo masinos livery.'] =
+      'Your car livery does not fit the parts of another car - they take a livery of their own car.',
     ['Senojo variklio vieta'] = 'Old engine position',
     ['Senosios pakabos vieta'] = 'Old suspension position',
     ['Senosios dezes vieta'] = 'Old gearbox position',
