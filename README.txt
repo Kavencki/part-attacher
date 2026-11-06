@@ -4,6 +4,11 @@ Mod author: Kavencki - Giedrius P.        Version: 1.4 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
++----------------------------------------------------------------------------+
+|  Enjoying Part Attacher? It's free and made in my spare time.              |
+|  Support it with a coffee:  https://buymeacoffee.com/giedrelis             |
+|  Every coffee = more features and faster fixes. Thank you!                 |
++----------------------------------------------------------------------------+
 
 WHAT IT DOES
 ------------
