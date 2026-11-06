@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.3 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.4 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -18,14 +18,15 @@ WHAT IT DOES
   part size (scale).
 - SAFETY ELECTRONICS on any vehicle: ABS, traction control, stability control,
   2-step launch control, line lock.
-- FRONT END SWAP: another vehicle's whole front (bumper, fenders, hood, lights,
-  grille) on yours in one go.
-- Added exhausts work like real ones (smoke, pops, sound), any number of them.
-- Donor liveries on another car's parts and on a front end swap.
-- Part size per axis (X / Y / Z), typed values beside the sliders, Copy.
-- Works in multiplayer (BeamMP).
+- FRONT END and WHOLE BODY SWAP: another vehicle's front or whole body on yours.
+- SAVED VEHICLES: save a finished vehicle by name and spawn it again later.
+- REAR WHEEL STEERING (4WS) like the Pessima AWS, and a DIFFERENT WHEEL ON EVERY
+  CORNER, picked in the game's own Parts menu.
+- Part pictures: rest the mouse on a part in the list to see its model; parts
+  that would do nothing on a vehicle are left out of the list.
 - Everything is saved with the game's own vehicle save and loads on any map.
-- English and Lithuanian UI.
+- UI in English, Lithuanian, German, Spanish, Italian, Russian, Chinese and Japanese,
+  with a UI size slider.
 
 
 INSTALL
@@ -37,9 +38,8 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 QUICK START
 -----------
 The window's sections are tabs at its top: Part (sections 1 and 2), Installed
-(3), Drivetrain (4), Suspension (5), Electronics (6), Front end (7). When a
-preview appears, its position (section 2) shows on top of the same Part tab -
-no other tab needed.
+(3), Drivetrain (4), Suspension (5), Electronics (6), Body (7), Saved (8).
+When a preview appears, its position (section 2) shows on top of the same Part tab - no other tab needed.
 
 1. Get into the vehicle you want to modify.
 2. Press  Ctrl + Shift + Y  to open the window (rebind it in Options > Controls >
@@ -67,6 +67,17 @@ SECTION 1 - PICK A PART
   collisions, never breaks, it just moves with the vehicle. Parts whose model
   hangs on their own car's body (radiators...) always come like this.
 - "Vehicle paint": paint the part in your vehicle's colours.
+- Part picture: rest the mouse on a part in the list and a small window shows its
+  model ("Part picture on mouse hover"). The first time the part loads for a
+  moment (the game may stop for a second); the picture is saved and shows at once
+  next time. "Delete pictures" deletes the saved ones. In multiplayer only the
+  pictures saved before show.
+  Picking a vehicle makes its part pictures by itself: a few of its factory
+  configs load one by one (each one a short stutter) and all their parts get a
+  picture. The progress shows under the list, "Stop" stops it.
+- Parts that would do nothing on a vehicle (bulbs, ECU tunes - no points, model
+  or devices of their own) are not listed. Parts with devices but no model (e.g.
+  a truck's air compressor) are marked "[data only]"; hovering one says what it adds.
 - "All parts by type" at the bottom: every part, including common ones and
   other vehicles' parts.
 - Data-only parts (no model and no points of their own, e.g. a truck's "Air
@@ -86,7 +97,9 @@ SECTION 2 - POSITION AND MOUNTING
   factor each (a wider bumper that is not taller). The preview reloads when you
   let go of a slider or a field; "Real size" goes back to x1. Section 3 shows
   the size (e.g. x1.50, or x1.20 / 0.90 / 1.00) and Move / Mirror / Copy keep
-  it. Lights and other props on the part keep their own size.
+  it. The light changes with it: a bigger lamp shines stronger (by
+  its area), further and with a bigger flare. Other props (e.g. a beacon's turning
+  model) keep their own size.
 - "Copy" (section 2 and section 3): one more of the same part as a new preview,
   at the very same place, turn and size - move it and ATTACH. In section 3 the
   installed part stays on the car.
@@ -170,16 +183,16 @@ temperature simulation.
 
 SUSPENSION
 ----------
-- LOGIC (recommended, never breaks): in a suspension folder pick a donor and press
-  "LOGIC: take over only the character" - its spring, damper and sway bar rates
-  go onto your own suspension. Section 5 adjusts front / rear separately: ride
-  height (-20..+60 cm), springs x, dampers x, sway bar x.
-- SUSPENSION SWAP (experimental): the real donor suspension with its wheels,
+- SUSPENSION SWAP (the orange button): the real donor suspension with its wheels,
   hubs, dampers, brakes and steering. It hangs on its own invisible virtual
   frame that is welded to your body, so a foreign axle can't tear the body
   apart. Live axles, links and coilovers are supported. Older swaps get a FIX
   button in section 3. If the new suspension's shafts can't find your drivetrain,
   the universal drivetrain switches on by itself.
+- LOGIC (safer, never breaks): the button below it, "LOGIC: take over only the
+  character" - the donor's spring, damper and sway bar rates go onto your own
+  suspension. Section 5 adjusts front / rear separately: ride height
+  (-20..+60 cm), springs x, dampers x, sway bar x.
 - SECOND REAR AXLE (6 wheels): in the rear suspension folder press "ADD AS A
   SECOND REAR AXLE". Your rear suspension stays; the new axle comes behind it on
   its own virtual frame (move Y in section 2), with its own wheel names. Both rear
@@ -205,9 +218,9 @@ shafts) is rebuilt from the real wheel positions:
   driveshaft model is drawn.
 
 
-SECTION 7 - FRONT END SWAP
---------------------------
-Put the whole front of another vehicle on yours:
+SECTION 7 - FRONT END / BODY SWAP (tab "Body")
+----------------------------------------------
+"Front end only" puts the whole front of another vehicle on yours:
 - Pick the donor in "Vehicle (donor)". Its front end parts are listed from its
   default parts (front bumper, bumper support, fenders, hood, headlights, grille,
   fog lights, front fascia, radiator support...) - untick what you don't want.
@@ -223,13 +236,57 @@ Put the whole front of another vehicle on yours:
   its parts were bolted to the donor's body, so the bumper, fenders and hood
   bend and break in a crash. "Strength" in section 2 sets how hard it holds on.
 
+"Whole body (body swap)" puts another vehicle's whole body on your running gear:
+- Its body parts are listed (shell, doors, hood, trunk, bumpers, fenders, lights,
+  glass, interior...) - without its wheels, suspension, engine, gearbox, frame
+  and fuel tank, which stay out of it.
+- Under each body part its own parts are listed (doors, hood, trunk, bumpers,
+  lights, glass, interior...): untick any you don't want, it is left out.
+- "SPAWN BODY": one preview, centred on your car's body and, with "Auto size",
+  as long and as wide as it (width and length sized separately). Move it and
+  set its size in the Part tab, then ATTACH.
+- "Hide my vehicle's own body" (on by default): your body and its panels stay
+  only as the frame under the new one - invisible and not colliding; your
+  wheels, suspension, engine and steering wheel still show and work.
+- The new body hangs on your car at the points where the donor's suspension,
+  engine and frame held it, so it bends and breaks like on its own car. Its
+  lights work with your car's lights. Removing it in the Installed tab shows
+  your own body again.
+
+SECTION 8 - SAVED VEHICLES (tab "Saved")
+----------------------------------------
+Type a name and press "SAVE THIS VEHICLE": the whole vehicle with everything
+you added (parts, swaps, drivetrain, electronics, paint) is saved in
+settings/partAttacher/cars/<name>.json. The list below it: "Spawn" replaces
+the vehicle you are in with that saved one (on any map), "Delete" (press twice)
+removes it.
 
 SAVING YOUR VEHICLE
 -------------------
-Use the game's own save (Vehicle Config > Save): everything the mod did -
+The game's own save works too (Vehicle Config > Save): everything the mod did -
 parts, swaps, drivetrain, tuning, safety electronics, paint - is saved with the
 vehicle, and it loads on any map. Part Attacher must be enabled when you load
 such a vehicle.
+
+
+REAR WHEEL STEERING (4WS, section 5, at the bottom)
+--------------------------------------------------
+Like the Ibishu Pessima 2.0 ZX AWS: the rear wheels steer with the front ones. Every
+rear wheel with its disc gets a kingpin of its own and a hydraulic tie rod, the
+suspension or axle stays in place; the game's own rear wheel steering controller
+drives the tie rod. Modes: by speed (slow the opposite way - a smaller turning
+circle, fast the same way - more stable), like the Pessima (by the steering angle),
+always the opposite way, or always the same way (crab walk). "Largest angle" is how
+far the rear wheels turn at most (up to 45 deg; the by-speed mode holds it to a
+few degrees at speed). Works on a solid axle and with a swapped rear
+suspension too.
+
+A DIFFERENT WHEEL ON EVERY CORNER (section 5, at the bottom)
+------------------------------------------------------------
+Press "TURN ON" - the vehicle reloads, and the game's Parts menu (ESC > Vehicle
+Config) gets "- left" and "- right" next to "Front Wheels" and "Rear Wheels". Pick a
+rim and tyre for every wheel (wheels of different sizes tilt the vehicle). "Turn off"
+brings the usual slots back.
 
 
 SECTION 6 - SAFETY ELECTRONICS
@@ -259,20 +316,30 @@ MULTIPLAYER (BeamMP)
 - Before joining, disable your own local copy of Part Attacher in the Mod
   Manager if you have one (the server's copy has the same files).
 
-
 LANGUAGE
 --------
-At the bottom of the window: "Language / Kalba" - English (default) or Lithuanian.
+At the bottom of the window: "Language / Kalba" - English (default), Lithuanian,
+German, Spanish, Italian, Russian, Chinese or Japanese. The choice is saved
+(settings/partAttacher/settings.json). Chinese and Japanese use the game's own
+Chinese / Japanese font. Translations: lua/ge/extensions/partAttacher/lang*.lua
+"UI size" next to it makes the window's text and buttons bigger or smaller (x0.80 -
+x2.00, applied when you let go of the slider; "x1" goes back). The window always
+opens at the normal size.
+A bigger size first asks in a small window in the middle of the screen: press
+"APPROVE THIS SIZE" within 15 s, or the size before comes back.
 
 
 TROUBLESHOOTING
 ---------------
+- Auto undo: if the vehicle goes unstable (its physics blow up) within 20 s after
+  a change made by the mod, the change is undone at once and the vehicle is put
+  back as it was, upright where it stood.
 - Every load of a modded vehicle writes  settings/partAttacher/last_load.log
   (what was built, what was left out, which nodes needed more mass). If a
   vehicle explodes or a part hangs loose, that file tells why - please attach it
   to bug reports.
 - After changing mod files: Ctrl+L reloads Lua, Ctrl+R reloads the vehicle.
-- "Instability detected": try the suspension LOGIC mode instead of a geometry
+- "Instability detected": try the suspension LOGIC button instead of a geometry
   swap, or a donor closer in size to your vehicle.
 
 KNOWN LIMITATIONS (beta)

@@ -30,6 +30,36 @@ const TEXT = {
     open: "ATIDARYTI PART ATTACHER",
     hint: "Atidaro langa ir grizta i vaziavima. Klavisai: Ctrl + Shift + Y.",
   },
+  de: {
+    desc: "Jedes Teil von jedem Fahrzeug an deinem Fahrzeug, Motor- / Getriebe- / Fahrwerks- / Turbo-Swaps, universeller Antriebsstrang, Sicherheitselektronik.",
+    open: "PART ATTACHER ÖFFNEN",
+    hint: "Öffnet das Fenster und kehrt zum Fahren zurück. Taste: Strg + Umschalt + Y.",
+  },
+  es: {
+    desc: "Cualquier pieza de cualquier vehículo en tu vehículo, swaps de motor / caja de cambios / suspensión / turbo, transmisión universal, electrónica de seguridad.",
+    open: "ABRIR PART ATTACHER",
+    hint: "Abre la ventana y vuelve a la conducción. Tecla: Ctrl + Shift + Y.",
+  },
+  it: {
+    desc: "Qualsiasi pezzo di qualsiasi veicolo sul tuo veicolo, swap di motore / cambio / sospensioni / turbo, trasmissione universale, elettronica di sicurezza.",
+    open: "APRI PART ATTACHER",
+    hint: "Apre la finestra e torna alla guida. Tasto: Ctrl + Shift + Y.",
+  },
+  ru: {
+    desc: "Любая деталь с любой машины на твою машину, свап двигателя / коробки / подвески / турбо, универсальная трансмиссия, электроника безопасности.",
+    open: "ОТКРЫТЬ PART ATTACHER",
+    hint: "Открывает окно и возвращает к вождению. Клавиши: Ctrl + Shift + Y.",
+  },
+  zh: {
+    desc: "任何车辆的任何零件装到你的车上，发动机 / 变速箱 / 悬架 / 涡轮更换，通用传动系统，安全电子系统。",
+    open: "打开 PART ATTACHER",
+    hint: "打开窗口并回到驾驶。按键：Ctrl + Shift + Y。",
+  },
+  ja: {
+    desc: "どの車のどのパーツでも自分の車に。エンジン / ギアボックス / サスペンション / ターボのスワップ、ユニバーサル駆動系、安全電子装置。",
+    open: "PART ATTACHER を開く",
+    hint: "ウィンドウを開いて運転に戻ります。キー：Ctrl + Shift + Y。",
+  },
 }
 
 const lang = ref("en")
