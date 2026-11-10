@@ -2,9 +2,17 @@
   "devicetype":"keyboard",
   "version":1,
   "bindings":[
-    {
-      "action":"partAttacher_toggleWindow",
-      "control":"shift-ctrl y"
-    }
+    {"action":"partAttacher_toggleWindow", "control":"shift-ctrl y"},
+    {"action":"partAttacher_rocket", "control":"alt j"},
+    {"action":"partAttacher_hydFrontUp", "control":"alt numpad8"},
+    {"action":"partAttacher_hydFrontDown", "control":"alt numpad2"},
+    {"action":"partAttacher_hydRearUp", "control":"alt numpad9"},
+    {"action":"partAttacher_hydRearDown", "control":"alt numpad3"},
+    {"action":"partAttacher_hydLeanLeft", "control":"alt numpad4"},
+    {"action":"partAttacher_hydLeanRight", "control":"alt numpad6"},
+    {"action":"partAttacher_hydAllUp", "control":"alt numpad5"},
+    {"action":"partAttacher_hydAllDown", "control":"alt numpad0"},
+    {"action":"partAttacher_hydHop", "control":"alt space"},
+    {"action":"partAttacher_hydDance", "control":"alt numpad7"}
   ]
 }

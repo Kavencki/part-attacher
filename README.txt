@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.4 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.4.5 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -27,6 +27,9 @@ WHAT IT DOES
 - SAVED VEHICLES: save a finished vehicle by name and spawn it again later.
 - REAR WHEEL STEERING (4WS) like the Pessima AWS, and a DIFFERENT WHEEL ON EVERY
   CORNER, picked in the game's own Parts menu.
+- EV SWAP with the power and the battery you pick, LOWRIDER HYDRAULICS (with
+  sound, hops and a "Maybach dance") and a JATO ROCKET that can run on the
+  throttle like a 1950s jet car.
 - Part pictures: rest the mouse on a part in the list to see its model; parts
   that would do nothing on a vehicle are left out of the list.
 - Everything is saved with the game's own vehicle save and loads on any map.
@@ -118,6 +121,26 @@ SECTION 2 - POSITION AND MOUNTING
   (front end), and a "Livery" button by an installed part in section 3 (the car
   reloads). Shown only when the donor has liveries. The load log says
   "livery ... on N meshes".
+- "No logic" (by an installed part in section 3): only the part's physics,
+  model and couplers stay. Its controllers, powertrain devices, energy storage
+  and click buttons stay out of your vehicle - e.g. a tow bar from a vehicle
+  that hands its throttle to the coupled one (Trackmaster) no longer takes over
+  your truck's throttle. It still couples with the L key. "With logic" brings
+  it back; the part is marked "[no logic]". The load log says "no logic - left
+  out ..." and names what was left out.
+- Gauges: needles hang on three points each; points a gauge part takes from its
+  own car's dashboard or body come along, where they were on that car (the load
+  log says "prop nodes of its car brought along"). A gauge cluster on its own
+  (bluebuck_gauges, bolide_gauges...: it has no points of its own, so it comes
+  as "model only") keeps its needles and its gauge screen too. Screen gauges (ETK, Lansdale,
+  Bastion...) of an added dashboard get a name of their own, so they and your
+  car's own both work, and their data modules (rpm, fuel...) are found again -
+  also on a whole body or front end swap.
+- Tow hitches from trailers or trucks that take their inputs from the vehicle
+  coupled to them (e.g. B-Series' front tow hitch: "importInputs" - throttle,
+  brake, parking brake - and "importElectrics" - lights, signals) lose those on
+  your car, always: whatever you hook on never drives it. The load log says
+  "coupler input / electrics imports left out".
 - Snorkel: an attached snorkel (or any part with air intake points) really
   works - your engine takes its air through it too and floods only when the
   snorkel's top goes under water as well (also as "Model only"). The load log
@@ -273,6 +296,47 @@ parts, swaps, drivetrain, tuning, safety electronics, paint - is saved with the
 vehicle, and it loads on any map. Part Attacher must be enabled when you load
 such a vehicle.
 
+
+ROCKET (JATO)
+-------------
+The "Rocket (JATO)" button in section 1 brings the pickup's JATO rocket as a preview:
+place it, make it bigger or smaller with "Size" (a bigger rocket pushes harder - by its
+nozzle area - and burns longer) and ATTACH it. Fire: hold Alt+J (rebind it in Options >
+Controls) or "JATO" in the Powertrain menu. Its fuel lasts a few seconds; R (reset)
+refills it.
+Jet car (section 4, at the bottom - "Jet car (rocket on W)"): the rocket runs on the
+throttle like the 1950s jet cars - the harder you press W, the harder it pushes (in a
+forward gear or neutral, not in reverse), together with the engine. Set its fuel in
+seconds at full thrust (5 - 600) and press "TURN ON / UPDATE". Alt+J still fires it at
+full; R refills it.
+
+LOWRIDER HYDRAULICS (section 5, at the bottom)
+----------------------------------------------
+Every wheel gets a hydraulic cylinder beside its spring. Set the travel (cm), the speed
+and the stiffness and press "TURN ON / UPDATE". While driving: Alt + Numpad 8/2 - front
+up / down, 9/3 - rear, 4/6 - lean left / right, 5/0 - the whole vehicle, Alt + Space -
+hop (all cylinders out while held), Alt + Numpad 7 or "Maybach dance (5 s)" - the car
+bounces for 5 seconds like an active suspension's "free driving" mode, level, in a
+smooth wave about once a second (press again to stop). Every corner gets the same travel and the same
+speed (the shortest cylinder sets them), so the car goes up and down level. Rebind the keys in Options >
+Controls. "Reset the height" and R (reset) bring it back to the middle.
+Down, a cylinder goes at most half its own length (a short one, like the Sunburst's front,
+less than the travel set). It has a relief valve: it never pushes or pulls harder than
+about 2.4 times its corner's weight, so at the end of the travel (the wheel on its bump
+stop, the body on the ground) it gives way instead of throwing the car back up.
+It sounds like the game's own lowrider hydraulics (Bluebuck, Grand Marshal): the pump
+whines while the car goes up, the release valve hisses while it comes down - from the
+trunk.
+
+EV SWAP - ELECTRIC MOTOR (section 4, at the bottom)
+--------------------------------------------------
+The combustion engine becomes the game's own electric motor. Pick the power (kW) and
+the battery (kWh) and press "MAKE IT ELECTRIC". Full torque up to 35 % of the top
+revs, then constant power up to the revs the old engine had. The clutch and the
+gearbox stay, a battery takes the fuel tanks' place. What else ran off the engine
+(a truck's air compressor, a hydraulic pump) gets a small electric motor of its own on
+the same battery; N2O, anti-lag and the engine brake come off. "Bring the combustion engine
+back" undoes it all.
 
 REAR WHEEL STEERING (4WS, section 5, at the bottom)
 --------------------------------------------------
