@@ -71,13 +71,13 @@ SECTION 1 - PICK A PART
   hangs on their own car's body (radiators...) always come like this.
 - "Vehicle paint": paint the part in your vehicle's colours.
 - Part picture: rest the mouse on a part in the list and a small window shows its
-  model ("Part picture on mouse hover"). The first time the part loads for a
-  moment (the game may stop for a second); the picture is saved and shows at once
-  next time. "Delete pictures" deletes the saved ones. In multiplayer only the
-  pictures saved before show.
-  Picking a vehicle makes its part pictures by itself: a few of its factory
-  configs load one by one (each one a short stutter) and all their parts get a
-  picture. The progress shows under the list, "Stop" stops it.
+  saved picture ("Part picture on mouse hover"). New pictures are taken ONLY with
+  "Take part pictures" ticked (under the list; off by default, taking them
+  stutters): then a few factory configs of the picked vehicle load one by one
+  (each one a short stutter) and all their parts get a picture, and a part with
+  no picture gets one when the mouse rests on it. The progress shows under the
+  list, "Stop" stops it. "Delete pictures" deletes the saved ones. In multiplayer
+  only the pictures saved before show.
 - Parts that would do nothing on a vehicle (bulbs, ECU tunes - no points, model
   or devices of their own) are not listed. Parts with devices but no model (e.g.
   a truck's air compressor) are marked "[data only]"; hovering one says what it adds.
@@ -106,6 +106,21 @@ SECTION 2 - POSITION AND MOUNTING
 - "Copy" (section 2 and section 3): one more of the same part as a new preview,
   at the very same place, turn and size - move it and ATTACH. In section 3 the
   installed part stays on the car.
+- "Comes with" (section 2, under the preview): the part's sub parts (the parts in
+  its slots) with ticks. Untick one and that part and everything below it stays
+  out of the preview and the vehicle. "None" - only the part itself: e.g. a frame
+  without its body, engine and suspension instead of the whole vehicle. "Update
+  the preview" shows the changes. It works for a subframe swap too (e.g. without
+  its fuel tanks or tow hitch).
+- "Cut this part" (section 2, under the preview): cut part of the preview off
+  with a plane - e.g. spawn an off-roader's whole frame and keep only its front.
+  Position from the front, "Keep the FRONT" / "Keep the REAR", it can be turned;
+  cuts add up (cut the front and the rear - the middle stays). Models across the
+  cut are cut for real. Then move it and ATTACH - only what is left comes onto
+  the vehicle. "Remove" / "Whole part again" bring it back. A moved or copied
+  part keeps its cut. It can be a hole too: "Box", "Round",
+  "Tube" - only what is inside the orange shape is cut out; its place (from the
+  front, the bottom, to the side), size and turn are set with sliders.
 - Exhaust: an attached exhaust really works - smoke, afterfire pops and the
   exhaust sound come out of its tips like out of your car's own, for any number
   of them (two or three different exhausts at once too). The load log says
@@ -127,7 +142,12 @@ SECTION 2 - POSITION AND MOUNTING
   own car's dashboard or body come along, where they were on that car (the load
   log says "prop nodes of its car brought along"). A gauge cluster on its own
   (bluebuck_gauges, bolide_gauges...: it has no points of its own, so it comes
-  as "model only") keeps its needles and its gauge screen too. Screen gauges (ETK, Lansdale,
+  as "model only") keeps its needles and its gauge screen too; a digital screen
+  (the Vivace Race Gauges' digidash) runs with its own software and already
+  shows in the preview (it was "no texture").
+- Moving parts of an added part (props: radiator fans, needles, levers) sit and
+  move with the part wherever you put it (the game drew them where the part is
+  on its own car). The load log says "props of added parts: N placed". Screen gauges (ETK, Lansdale,
   Bastion...) of an added dashboard get a name of their own, so they and your
   car's own both work, and their data modules (rpm, fuel...) are found again -
   also on a whole body or front end swap.
@@ -221,6 +241,16 @@ SUSPENSION
   its own virtual frame (move Y in section 2), with its own wheel names. Both rear
   axles are driven by the universal drivetrain (an inter-axle differential
   between them; lock it with the Rear locker).
+- SUBFRAME SWAP: the ">> FRONT SUBFRAME" / ">> REAR SUBFRAME" folders - the whole
+  donor subframe with everything on it (suspension, hubs, wheels) in place of
+  your subframe, with all its logic. The donor engine (of a mid-engined car)
+  stays out - your own engine drives the new wheels through the universal
+  drivetrain (tick it in the "Comes with" list and it comes as a part only, it
+  does not run). If you took your subframe off in the Parts menu, put it back
+  first. A suspension from another vehicle can still be swapped into that
+  subframe afterwards (suspension folder) - it hangs on the new subframe.
+  Removing the subframe swap takes that suspension with it. (Don't add a
+  subframe as a separate part - its wheels fly off.)
 
 
 SECTION 4 - UNIVERSAL DRIVETRAIN
