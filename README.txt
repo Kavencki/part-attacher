@@ -46,7 +46,7 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 QUICK START
 -----------
 The window's sections are tabs at its top: Part (sections 1 and 2), Installed
-(3), Drivetrain (4), Suspension (5), Electronics (6), Body (7), Saved (8).
+(3), Drivetrain (4), Suspension (5), Electronics (6), Cut (7), Body (8), Saved (9).
 When a preview appears, its position (section 2) shows on top of the same Part tab - no other tab needed.
 
 1. Get into the vehicle you want to modify.
@@ -132,7 +132,7 @@ SECTION 2 - POSITION AND MOUNTING
   "exhaust on mainEngine".
 - Livery: your car's livery only goes on its own parts - another car's parts and
   a front end swap have their own meshes, so they can take one of the donor's
-  own liveries instead: "Livery (donor)" in section 2 (preview) and section 7
+  own liveries instead: "Livery (donor)" in section 2 (preview) and section 8
   (front end), and a "Livery" button by an installed part in section 3 (the car
   reloads). Shown only when the donor has liveries. The load log says
   "livery ... on N meshes".
@@ -295,7 +295,55 @@ shafts) is rebuilt from the real wheel positions:
   driveshaft model is drawn.
 
 
-SECTION 7 - FRONT END / BODY SWAP (tab "Body")
+SECTION 7 - CAR CUTTER (experimental)
+-------------------------------------
+Cut part of your vehicle off at a plane across it:
+- "Cut position from the front (m)": where the plane is (an orange plane on the
+  vehicle shows it, the red arrow points at the side that comes off).
+- "Keep the FRONT" / "Keep the REAR", then CUT. The vehicle reloads.
+- What is beyond the plane comes off: its beams, collisions, wheels and the
+  parts that lie fully beyond it. A wheel goes or stays whole, by its hub.
+- Models that cross the cut (the body shell, the interior) are cut for real:
+  the mod reads the car's model file, removes what is beyond the plane and saves
+  the cut models in BeamNG.drive/current/settings/partAttacher/cutmeshes/
+  <model>/<cut>/ in your user folder (the first cut at a spot takes a second or two). The cut
+  is open - you see inside the shell, like a real cut car. A model from a shared
+  folder that can't be cut stays whole, or goes if most of it is beyond the plane.
+  Those files can be deleted any time; the next cut makes them again.
+- The wheels that stay are driven by the universal drivetrain (section 4).
+- Parts you added and swapped suspensions are not cut: add another vehicle's
+  suspension or parts at the cut to finish it. "Restore the whole vehicle"
+  undoes the cut.
+- HOLES: instead of "Plane", pick "Box", "Round" (a ball) or "Tube" (a solid
+  cylinder): everything inside the shape is cut out, the rest of the vehicle
+  stays (a round hole in a door, a box out of the roof, a tube through the
+  whole body). Place it with "Position from the front / from the bottom / to
+  the side", size it with "Width / Length / Height" (box) or "Diameter" (and
+  "Tube length" and its direction: across, lengthwise or upright). The orange
+  outline on the vehicle shows it. A wheel goes if its centre is inside. The
+  models are cut along the shape (a round hole stays round), also a panel whose
+  points are all outside a small hole.
+- Turning: "Turn about the vertical", "Tilt forward / back" and "Lean to the side"
+  (degrees) turn a box or a tube about its centre; a plane turns about the
+  vehicle's middle at the cut (two turns: an angled cut). A ball needs none.
+- Passengers (the game's occupants) and loads cut in two are taken out of the
+  game's cargo system where they are cut: it set their springs and weights again
+  half a second after the spawn and blew the car up.
+- Models are looked for in the car's own folder and in the shared ones the game
+  loaded for it (an ETK's body is in vehicles/common/etk).
+- Cuts add up: every CUT adds one more (a plane and holes, any number of them:
+  two planes keep only the middle). The list under it shows them; "Remove" takes
+  one off, "Restore the whole vehicle" all of them. The models are cut by all of
+  them together.
+- A hole through a suspension mount (a shock tower): the wheel's torque points
+  that were there move to the nearest kept body point, so the brakes and the
+  drive still push on the car (they pushed on a cut-off point and blew it up).
+  The suspension's own spring and shock there are cut off with it - that corner
+  sinks.
+- The load log says "car cutter: N nodes of the car beyond y ..." or "... inside
+  the hole box / sphere / cyl ...".
+
+SECTION 8 - FRONT END / BODY SWAP (tab "Body")
 ----------------------------------------------
 "Front end only" puts the whole front of another vehicle on yours:
 - Pick the donor in "Vehicle (donor)". Its front end parts are listed from its
@@ -330,7 +378,7 @@ SECTION 7 - FRONT END / BODY SWAP (tab "Body")
   lights work with your car's lights. Removing it in the Installed tab shows
   your own body again.
 
-SECTION 8 - SAVED VEHICLES (tab "Saved")
+SECTION 9 - SAVED VEHICLES (tab "Saved")
 ----------------------------------------
 Type a name and press "SAVE THIS VEHICLE": the whole vehicle with everything
 you added (parts, swaps, drivetrain, electronics, paint) is saved in

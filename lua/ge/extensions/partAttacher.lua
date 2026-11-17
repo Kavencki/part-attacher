@@ -10967,9 +10967,9 @@ S.tabs = {
   {id = 'dt', label = 'Pavaros', title = '4. Universalios pavaros (kardanas / diferencialai / pusasiai)'},
   {id = 'susp', label = 'Pakaba', title = '5. Pakaba (logic): prosvaisa, spyruokles, amortizatoriai'},
   {id = 'safe', label = 'Elektronika', title = '6. Saugos elektronika (ABS, TC, ESC, 2-step, line lock)'},
-  -- (the car cutter, S.drawCutSection, is not finished: it lives in Part Attacher Experimental only)
-  {id = 'front', label = 'Kebulas', title = '7. Priekio ar viso kebulo swap is kitos masinos'},
-  {id = 'save', label = 'Issaugota', title = '8. Issaugotos masinos'},
+  {id = 'cut', label = 'Pjovimas', title = '7. Masinos pjovimas (experimental)'},
+  {id = 'front', label = 'Kebulas', title = '8. Priekio ar viso kebulo swap is kitos masinos'},
+  {id = 'save', label = 'Issaugota', title = '9. Issaugotos masinos'},
 }
 
 -- a bigger UI size waits for approval: this small window stays at the normal size in the middle of
