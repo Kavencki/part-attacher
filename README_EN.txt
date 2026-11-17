@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.4.5 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.4.6 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -241,6 +241,25 @@ SUSPENSION
   its own virtual frame (move Y in section 2), with its own wheel names. Both rear
   axles are driven by the universal drivetrain (an inter-axle differential
   between them; lock it with the Rear locker).
+- MORE AXLES: after the second rear axle the same button adds a third, fourth
+  and fifth one (up to 5 rear axles, each 1.3 m further back). In the front
+  suspension folder - "ADD AS A SECOND FRONT AXLE" (e.g. an 8x4 truck): it steers
+  with its own steering cylinders and is driven only with FWD or AWD. An axle far
+  behind the vehicle's body can also hang on an added part with physics (a long
+  frame, say) or on another added axle's frame. "Restore original" (section 3)
+  takes each one off.
+- FRONT AS REAR: in the front suspension folder, "USE AS THE REAR SUSPENSION" -
+  e.g. an off-roader's independent suspension (pickup_desert_suspension_IFS)
+  instead of the solid rear axle. Its wheels become the rear ones (RL / RR) and
+  are driven like them, its steering cylinders are locked straight; the
+  universal drivetrain switches on. In the same folder, "ADD AS THE NEXT REAR
+  AXLE (..., front used as rear)" adds it as a second, third... rear axle (up
+  to 5).
+- SUSPENSION SIZE: a suspension preview has "Size (scale)" (or "Size per axis
+  X / Y / Z") - the suspension (arms, shocks, hubs) grows / shrinks, while the
+  wheels and brakes keep their size and only move along with the hubs. E.g. X
+  only - a wider track, Z only - a taller suspension (monster truck). The
+  Installed list shows the suspension's size (e.g. x1.30); "Move" keeps it.
 - SUBFRAME SWAP: the ">> FRONT SUBFRAME" / ">> REAR SUBFRAME" folders - the whole
   donor subframe with everything on it (suspension, hubs, wheels) in place of
   your subframe, with all its logic. The donor engine (of a mid-engined car)

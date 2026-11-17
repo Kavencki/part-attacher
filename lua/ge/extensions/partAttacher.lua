@@ -49,7 +49,7 @@ end
 -- "##id" endings stay as they are. Results are cached.
 --------------------------------------------------------------------------------
 
-S.version = 'v1.4.5 beta'
+S.version = 'v1.4.6 beta'
 S.settingsFile = '/settings/partAttacher/settings.json'
 S.langCodes = {'en', 'lt', 'de', 'es', 'it', 'ru', 'zh', 'ja'}
 S.lang = 'en' -- English by default
@@ -1312,7 +1312,10 @@ end
 -- pivot x, y, z} too): its node positions and its meshes (flexbody pos / scale), before the slot's
 -- own rotate / move. Beams get their new lengths at spawn. Each axis on its own: a mesh turned by
 -- its flexbody rot gets stretched along the car's axes, not its own.
-S.scalePart = function(part, sc)
+-- keep (optional): function(mesh, groups) -> true for a placed mesh (one with a pos) that only moves
+-- and keeps its size (a scaled suspension's brake discs / calipers); nodeDelta (optional): node name
+-- -> {dx, dy, dz} for nodes that only move by that (a scaled suspension's wheel axle nodes)
+S.scalePart = function(part, sc, keep, nodeDelta)
   if type(part) ~= 'table' or type(sc) ~= 'table' then return end
   local f, p
   if sc[6] ~= nil then
@@ -1344,7 +1347,10 @@ S.scalePart = function(part, sc)
   end
   for _, row in ipairs(type(part.nodes) == 'table' and part.nodes or {}) do
     if type(row) == 'table' and type(row[1]) == 'string' and row[1] ~= 'id' then
-      for axis = 1, 3 do row[axis + 1] = scaled(row[axis + 1], axis) end
+      local d = type(nodeDelta) == 'table' and nodeDelta[row[1]]
+      for axis = 1, 3 do
+        if d then row[axis + 1] = S.linExpr(row[axis + 1], 1, d[axis]) else row[axis + 1] = scaled(row[axis + 1], axis) end
+      end
     end
   end
   -- mesh: vertex -> pos + rot * (scale * vertex), so around p: pos' = s * pos + (1 - s) * p, scale' = s * scale
@@ -1368,14 +1374,189 @@ S.scalePart = function(part, sc)
           end
           local pos = type(opts.pos) == 'table' and opts.pos or curPos or {}
           local scl = type(opts.scale) == 'table' and opts.scale or curScale or {}
+          local keepSize = keep and (type(opts.pos) == 'table' or curPos ~= nil) and keep(row[1], row[2])
           opts.pos = {x = scaled(pos.x or 0, 1), y = scaled(pos.y or 0, 2), z = scaled(pos.z or 0, 3)}
-          opts.scale = {x = times(scl.x or 1, 1), y = times(scl.y or 1, 2), z = times(scl.z or 1, 3)}
+          if not keepSize then
+            opts.scale = {x = times(scl.x or 1, 1), y = times(scl.y or 1, 2), z = times(scl.z or 1, 3)}
+          end
         end
       end
     end
   end
   S.scaleLights(part, f, exprOf)
   S.scaleThrusters(part, f, exprOf)
+end
+
+-- a * v + b for a number or a jbeam expression / variable ("$=...", "$name"); nil / '' count as 0
+S.linExpr = function(v, a, b)
+  if v == nil or v == '' then v = 0 end
+  if type(v) == 'number' then return v * a + b end
+  if type(v) == 'string' and v:sub(1, 1) == '$' then
+    return string.format('$=(%s)*%.6g+%.6g', v:sub(1, 2) == '$=' and v:sub(3) or v, a, b)
+  end
+  return v
+end
+
+-- a suspension (a swapped part's tree) grown / shrunk while its wheels keep their size; sc = {x, y,
+-- z factors, pivot x, y, z}. entries: the tree's unify journal entries; root: a part above them that
+-- is no entry (a preview's main part); rootOptions: the slot options the tree's top came with.
+-- The wheel side - the parts under a slot with a nodeOffset (rims, tires, hubcaps, often the axle
+-- nodes the rims bring), which that offset places at the hubs - is not scaled: the offset follows the
+-- hub to its new place. Axle nodes of the suspension's own only move with their hub too, brake meshes
+-- (discs, calipers, drums) keep their size. Everything else gets S.scalePart. Returns a log line.
+S.scaleSwapTree = function(entries, sc, root, rootOptions)
+  local f = {tonumber(sc[1]) or 1, tonumber(sc[2]) or 1, tonumber(sc[3]) or 1}
+  local p = {tonumber(sc[4]) or 0, tonumber(sc[5]) or 0, tonumber(sc[6]) or 0}
+  local function sig(v)
+    return type(v) == 'table' and string.format('%s|%s|%s', tostring(v.x), tostring(v.y), tostring(v.z)) or ''
+  end
+  local function eachNode(part, fn)
+    for _, row in ipairs(type(part) == 'table' and type(part.nodes) == 'table' and part.nodes or {}) do
+      if type(row) == 'table' and type(row[1]) == 'string' and row[1] ~= 'id'
+        and type(row[2]) == 'number' and type(row[3]) == 'number' and type(row[4]) == 'number' then
+        fn(row[1], row[2], row[3], row[4])
+      end
+    end
+  end
+  local function mean(t)
+    local s = 0
+    for _, v in ipairs(t) do s = s + v end
+    return #t > 0 and s / #t or nil
+  end
+  -- the wheel side: entries grouped by the offset they came with (one wheel slot: both sides)
+  local plain, groups, order = {}, {}, {}
+  if type(root) == 'table' then plain[#plain + 1] = root end
+  for _, entry in ipairs(entries) do
+    local opts, key = entry[4], nil
+    if type(opts) == 'table' then
+      local keys = {}
+      for k, v in pairs(opts) do
+        if type(k) == 'string' and k:match('^nodeOffset%d*$') and type(v) == 'table'
+          and not (type(rootOptions) == 'table' and sig(rootOptions[k]) == sig(v)) then keys[#keys + 1] = k end
+      end
+      table.sort(keys)
+      key = keys[1]
+    end
+    if key then
+      local id = key .. '#' .. sig(opts[key])
+      local g = groups[id]
+      if not g then
+        g = {key = key, value = opts[key], entries = {}}
+        groups[id] = g
+        order[#order + 1] = g
+      end
+      g.entries[#g.entries + 1] = entry
+    elseif type(entry[2]) == 'table' then
+      plain[#plain + 1] = entry[2]
+    end
+  end
+  -- the scaled parts' node places, and the wheels: their generated node groups (meshes on those are
+  -- wheel side meshes), and the axle nodes the scaled parts hold themselves
+  local pos, wheelGroups = {}, {}
+  for _, part in ipairs(plain) do
+    eachNode(part, function(name, x, y, z) pos[name] = {x, y, z} end)
+  end
+  local axles = {}
+  local function readWheels(part)
+    for sectionName, section in pairs(type(part) == 'table' and part or {}) do
+      if S.wheelSections[sectionName] and type(section) == 'table' and type(section[1]) == 'table' then
+        local col = {}
+        for i, h in ipairs(section[1]) do
+          if type(h) == 'string' then col[(h:gsub(':$', ''))] = i end
+        end
+        for r = 2, #section do
+          local row = section[r]
+          if type(row) == 'table' and type(row[1]) == 'string' then
+            for _, k in ipairs({'group', 'hubGroup'}) do
+              if col[k] and type(row[col[k]]) == 'string' and row[col[k]] ~= '' then wheelGroups[row[col[k]]] = true end
+            end
+            local n1, n2 = col.node1 and row[col.node1], col.node2 and row[col.node2]
+            if type(n1) == 'string' and type(n2) == 'string' then axles[#axles + 1] = {n1, n2} end
+          end
+        end
+      end
+    end
+  end
+  for _, part in ipairs(plain) do readWheels(part) end
+  for _, g in ipairs(order) do
+    for _, entry in ipairs(g.entries) do readWheels(entry[2]) end
+  end
+  -- axle nodes of the scaled parts' own: both move by their middle's shift (the wheel stays as wide)
+  local nodeDelta, freeMids = {}, {}
+  for _, ax in ipairs(axles) do
+    local a, b = pos[ax[1]], pos[ax[2]]
+    if a and b and not nodeDelta[ax[1]] then
+      local mid = {(a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5, (a[3] + b[3]) * 0.5}
+      local d = {(f[1] - 1) * (mid[1] - p[1]), (f[2] - 1) * (mid[2] - p[2]), (f[3] - 1) * (mid[3] - p[3])}
+      nodeDelta[ax[1]], nodeDelta[ax[2]] = d, d
+      freeMids[#freeMids + 1] = mid
+    end
+  end
+  -- every wheel slot: its offset moves the wheel side where the hub went
+  local wheelParts, freeUsed = 0, 0
+  for _, g in ipairs(order) do
+    local rx, lx, ys, zs = {}, {}, {}, {}
+    local function add(x, y, z)
+      if x < -1e-4 then rx[#rx + 1] = x elseif x > 1e-4 then lx[#lx + 1] = x end
+      ys[#ys + 1] = y
+      zs[#zs + 1] = z
+    end
+    -- the wheel side's own nodes (axle nodes the rims bring), before the offset: the offset grows with
+    -- the suspension (a * offset) and K adds the rest
+    for _, entry in ipairs(g.entries) do eachNode(entry[2], function(_, x, y, z) add(x, y, z) end) end
+    local a = {f[1], f[2], f[3]}
+    if #ys == 0 then
+      -- meshes only: they sit around axle nodes of the suspension's own, which only move
+      local oy = type(g.value) == 'table' and tonumber(g.value.y) or nil
+      for _, m in ipairs(freeMids) do
+        if not oy or math.abs(m[2] - oy) < 0.4 then add(m[1], m[2], m[3]) end
+      end
+      if #ys > 0 then
+        a = {1, 1, 1}
+        freeUsed = freeUsed + 1
+      end
+    end
+    local mR, mL = mean(rx), mean(lx)
+    local my, mz = mean(ys) or 0, mean(zs) or 0
+    local kx, shift = 0, nil
+    if mR and mL then
+      kx = (f[1] - 1) * (mL - mR) * 0.5
+      shift = (f[1] - 1) * ((mL + mR) * 0.5 - p[1])
+    elseif mL then
+      kx = (f[1] - 1) * (mL - p[1])
+    elseif mR then
+      kx = -(f[1] - 1) * (mR - p[1])
+    end
+    local v = g.value
+    local new = {x = S.linExpr(v.x, a[1], kx), y = S.linExpr(v.y, a[2], (f[2] - 1) * (my - p[2])),
+      z = S.linExpr(v.z, a[3], (f[3] - 1) * (mz - p[3]))}
+    -- the offset is mirrored (x away from the middle): a pivot off the axle's middle shifts both sides
+    local moveKey = g.key:gsub('^nodeOffset', 'nodeMove')
+    for _, entry in ipairs(g.entries) do
+      entry[4][g.key] = deepcopy(new)
+      if shift and math.abs(shift) > 1e-3 then
+        local mv = entry[4][moveKey]
+        if type(mv) == 'table' then
+          entry[4][moveKey] = {x = S.linExpr(mv.x, 1, shift), y = mv.y or 0, z = mv.z or 0}
+        else
+          entry[4][moveKey] = {x = shift, y = 0, z = 0}
+        end
+      end
+      wheelParts = wheelParts + 1
+    end
+  end
+  local function keep(mesh, grp)
+    for _, name in ipairs(type(grp) == 'table' and grp or {grp}) do
+      if type(name) == 'string' and wheelGroups[name] then return true end
+    end
+    local m = type(mesh) == 'string' and mesh:lower() or ''
+    return m:find('brake', 1, true) ~= nil or m:find('caliper', 1, true) ~= nil or m:find('rotor', 1, true) ~= nil
+      or m:find('drum', 1, true) ~= nil
+  end
+  local sc6 = {f[1], f[2], f[3], p[1], p[2], p[3]}
+  for _, part in ipairs(plain) do S.scalePart(part, sc6, keep, nodeDelta) end
+  return string.format('x%.2f / %.2f / %.2f: %d parts scaled, %d wheel side parts moved with their hubs (%d wheel slots, %d placed by the axle nodes), %d axle nodes moved',
+    f[1], f[2], f[3], #plain, wheelParts, #order, freeUsed, tableSize(nodeDelta))
 end
 
 -- a scaled rocket (thrusters, e.g. a JATO): its push goes with its nozzle's area, its fuel (burn
@@ -1916,6 +2097,8 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   S.extraMounts = {} -- per added part: its node names that held on to the donor (S.isolateExtras)
   S.bodyMounts = {} -- per added body: the body nodes its left out running gear hung on (S.isBodyStub)
   local pa = type(vehicleConfig) == 'table' and type(vehicleConfig.partAttacher) == 'table' and vehicleConfig.partAttacher
+  -- a scaled suspension preview: its tree grows / shrinks in the unify step, its wheels keep their size
+  S.ghostSwapScale = (pa and pa.ghost and type(pa.swapScale) == 'table') and pa.swapScale or nil
   -- a different wheel on every corner: twin rim slots while the parts are found (S.addCornerSlots)
   S.cornerLoad = (pa and pa.cornerWheels == true and not pa.ghost) and {finding = true, sides = {}} or nil
   -- a body swap preview: the donor's running gear stays out while its parts load (S.findPartsHook clears it)
@@ -2342,6 +2525,20 @@ local function renameSwappedTrees(journal, partSwaps)
         end
       end
       entries = S.dropSwapBranches(entries, alias, kind, swapSpec)
+      -- a scaled suspension: its tree grows / shrinks (raw names, before the renaming), its wheels keep
+      -- their size
+      local swapScale = type(swapSpec) == 'table' and S.extraScale(swapSpec)
+      if swapScale then
+        local rootOpts
+        for _, entry in ipairs(entries) do
+          if type(entry[2]) == 'table' and entry[2].partName == alias then
+            rootOpts = entry[4]
+            break
+          end
+        end
+        local okSc, res = pcall(S.scaleSwapTree, entries, swapScale, nil, rootOpts)
+        log(okSc and 'I' or 'E', logTag, string.format('part swap %s scaled: %s', kind, tostring(res)))
+      end
       for _, entry in ipairs(entries) do subtree[#subtree + 1] = entry[2] end
       if #foreign > 0 then
         log('W', logTag, string.format('part swap %s: left out %d parts the donor %s does not have: %s', kind, #foreign, tostring(swapSpec.model), table.concat(foreign, ', ')))
@@ -2384,6 +2581,46 @@ local function renameSwappedTrees(journal, partSwaps)
           end
         end
         log('I', logTag, string.format('part swap %s (added axle): %d wheels renamed, %d drivetrain devices of its own left out', kind, renamedWheels, strippedDevices))
+      end
+      -- a front suspension used at the rear (an IFS for off-road instead of a solid rear axle): its
+      -- wheels FL / FR become the rear's RL / RR (the car's own front ones keep their names), its
+      -- shafts follow them, its named beams get the swap's prefix like an added axle's
+      if type(swapSpec) == 'table' and swapSpec.asRear and not swapSpec.added then
+        local function toRear(name)
+          if type(name) == 'string' and name:sub(1, 1) == 'F' then return 'R' .. name:sub(2) end
+          return name
+        end
+        local renamedWheels, shafts = 0, 0
+        beamNames = beamNames or {}
+        for _, part in ipairs(subtree) do
+          for _, row in ipairs(type(part.beams) == 'table' and part.beams or {}) do
+            if type(row) == 'table' then
+              if type(row.name) == 'string' and row.name ~= '' then beamNames[row.name] = true end
+              for _, v in ipairs(row) do
+                if type(v) == 'table' and type(v.name) == 'string' and v.name ~= '' then beamNames[v.name] = true end
+              end
+            end
+          end
+          for sectionName, section in pairs(part) do
+            if S.wheelSections[sectionName] and type(section) == 'table' then
+              for _, row in ipairs(section) do
+                if type(row) == 'table' and type(row[1]) == 'string' and row[1] ~= 'name' and toRear(row[1]) ~= row[1] then
+                  row[1] = toRear(row[1])
+                  renamedWheels = renamedWheels + 1
+                end
+              end
+            end
+          end
+          for _, row in ipairs(type(part.powertrain) == 'table' and part.powertrain or {}) do
+            for _, v in ipairs(type(row) == 'table' and row or {}) do
+              if type(v) == 'table' and type(v.connectedWheel) == 'string' and toRear(v.connectedWheel) ~= v.connectedWheel then
+                v.connectedWheel = toRear(v.connectedWheel)
+                shafts = shafts + 1
+              end
+            end
+          end
+        end
+        log('I', logTag, string.format('part swap %s: a front suspension at the rear - %d wheels renamed to the rear\'s, %d shafts follow them', kind, renamedWheels, shafts))
       end
       S.droppedRefs = {}
       renameTreeParts(subtree, partSwapPrefix(kind), snapMap, beamNames)
@@ -2952,6 +3189,23 @@ local function wrappedUnifyPartJournal(ioCtx, journal)
     log(ok and 'I' or 'E', logTag, 'wheels per corner: ' .. tostring(res))
   end
   S.cornerLoad = nil
+  local ghostSwapScale = S.ghostSwapScale
+  S.ghostSwapScale = nil
+  if ghostSwapScale and type(journal) == 'table' then
+    -- the preview's main part (the suspension): the parent that is no entry's child
+    local children, root = {}, nil
+    for _, entry in ipairs(journal) do
+      if type(entry[2]) == 'table' then children[entry[2]] = true end
+    end
+    for _, entry in ipairs(journal) do
+      if type(entry[1]) == 'table' and not children[entry[1]] then
+        root = entry[1]
+        break
+      end
+    end
+    local ok, res = pcall(S.scaleSwapTree, journal, ghostSwapScale, root, nil)
+    log(ok and 'I' or 'E', logTag, 'scaled suspension preview: ' .. tostring(res))
+  end
   if extras and type(journal) == 'table' then
     local ok, err = pcall(S.isolateExtras, journal, extras)
     if not ok then log('E', logTag, 'isolating the added parts failed: ' .. tostring(err)) end
@@ -3780,8 +4034,19 @@ local function buildUniversalDrivetrain(vehicle, spec)
       axles[#axles + 1] = {y = w.y, wheels = {w}}
     end
   end
-  local frontAxles, rearAxles = {axles[1]}, {}
-  for i = 2, #axles do rearAxles[#rearAxles + 1] = axles[i] end
+  -- the front axle, and an added second front axle (its wheels are named upssusp_F2_...) with every
+  -- axle ahead of it - set in front of the car's own front axle, the car's own is front too
+  local frontCount = 1
+  for i, ax in ipairs(axles) do
+    for _, w in ipairs(ax.wheels) do
+      if w.name:find('^upssusp_F2_') then frontCount = math.max(frontCount, i == 1 and 2 or i) end
+    end
+  end
+  frontCount = math.min(frontCount, math.max(1, #axles - 1))
+  local frontAxles, rearAxles = {}, {}
+  for i = 1, #axles do
+    if i <= frontCount then frontAxles[#frontAxles + 1] = axles[i] else rearAxles[#rearAxles + 1] = axles[i] end
+  end
   if #rearAxles == 0 then rearAxles = frontAxles end
 
   local layout = spec.layout or 'RWD'
@@ -4421,7 +4686,14 @@ end
 local swapKinds = {
   susp_F = {label = 'Priekine pakaba'},
   susp_R = {label = 'Galine pakaba'},
-  susp_R2 = {label = 'Antra galine asis', added = true}, -- an added axle: replaces nothing
+  -- added axles: they replace nothing. Up to 5 rear axles in all (the car's own + 4), and a second
+  -- front axle (it steers with its own steering cylinders). Their labels show in upper case too
+  -- (label:upper(): TRECIA GALINE ASIS, KETVIRTA GALINE ASIS, PENKTA GALINE ASIS, ANTRA PRIEKINE ASIS)
+  susp_R2 = {label = 'Antra galine asis', added = true, rear = 2},
+  susp_R3 = {label = 'Trecia galine asis', added = true, rear = 3},
+  susp_R4 = {label = 'Ketvirta galine asis', added = true, rear = 4},
+  susp_R5 = {label = 'Penkta galine asis', added = true, rear = 5},
+  susp_F2 = {label = 'Antra priekine asis', added = true, front = true},
   -- a whole subframe with what it carries (suspension, hubs, a mid-engined car's engine); a kind of
   -- its own, so a suspension swap can still go into it afterwards (susp_R inside sub_R)
   sub_F = {label = 'Priekinis subframe', subframe = true},
@@ -5157,25 +5429,38 @@ local function swapPart(e, target)
     move = {off.x, off.y, off.z},
     rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
     pivot = {e.pivot.x, e.pivot.y, e.pivot.z},
+    -- its size (the one the preview was built at): the suspension grows / shrinks, its wheels don't
+    scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
     maxGap = S.maxGapPtr[0],
     strength = S.unbreakablePtr[0] and -1 or math.max(1000, S.strengthPtr[0]),
     added = added or nil,
-    mountRef = added and (e.mountRef or getTargetSuspension(target:getID(), 'susp_R')) or nil,
+    mountRef = added and (e.mountRef or getTargetSuspension(target:getID(), swapKinds[kind].front and 'susp_F' or 'susp_R')) or nil,
     -- a suspension going into a swapped-in subframe: welded onto that subframe
     inside = not added and not swapKinds[kind].subframe and S.swapHolding(target:getID(), replaces, kind) or nil,
     -- the sub parts ticked off in the preview's "comes with" list (S.dropSwapBranches)
     skip = type(e.skip) == 'table' and deepcopy(e.skip) or nil,
+    -- a front suspension used at the rear (the rear one, or an added rear axle): its wheels become
+    -- rear wheels, its steering is locked
+    asRear = (e.asRear and not (added and swapKinds[kind].front)) or nil,
   }
   local imported, frame = prepareSuspensionBundle(target, spec)
   local drivetrain
   local current = getPA(target:getID()).drivetrain
   if added then
-    -- its own drivetrain devices stay out: the universal drivetrain drives it (both rear axles,
-    -- an inter-axle differential between them)
+    -- its own drivetrain devices stay out: the universal drivetrain drives it (the rear axles with
+    -- inter-axle differentials between them; a second front axle with the front one)
     if not (type(current) == 'table' and current.enabled) then
       drivetrain = drivetrainSpecFromUI()
-      if drivetrain.layout == 'FWD' then drivetrain.layout = 'AWD' end
-      msg(string.format('Antra galine asis varoma universaliomis pavaromis (%s).', drivetrain.layout), 8)
+      if swapKinds[kind].front then
+        msg(string.format('%s: ijungtos universalios pavaros (%s).', swapKinds[kind].label, drivetrain.layout), 8)
+      else
+        if drivetrain.layout == 'FWD' then drivetrain.layout = 'AWD' end
+        if kind == 'susp_R2' then
+          msg(string.format('Antra galine asis varoma universaliomis pavaromis (%s).', drivetrain.layout), 8)
+        else
+          msg(string.format('%s: ijungtos universalios pavaros (%s).', swapKinds[kind].label, drivetrain.layout), 8)
+        end
+      end
     end
   else
     local drivable, missing = donorWheelsDrivable(target:getID(), e.model, e.partName, replaces)
@@ -5188,6 +5473,13 @@ local function swapPart(e, target)
       and S.donorTreeHasEngine(e.model, e.partName) then
       drivetrain = drivetrainSpecFromUI()
       msg(string.format('Donoro subframe variklis nededamas - naujus ratus suka tavo variklis per universalias pavaras (%s).', drivetrain.layout), 8)
+    end
+    -- a front suspension at the rear brings a front differential that would hang on the car's front
+    -- drive: the universal drivetrain builds the drive from the wheels' real places instead
+    if spec.asRear and not drivetrain and not (type(current) == 'table' and current.enabled) then
+      drivetrain = drivetrainSpecFromUI()
+      if drivetrain.layout == 'FWD' then drivetrain.layout = 'AWD' end
+      msg(string.format('Priekine pakaba kaip galine: ijungtos universalios pavaros (%s).', drivetrain.layout), 8)
     end
   end
   deleteEntry(e)
@@ -5361,6 +5653,7 @@ local function registerEntry(id, partName, model, target, preset)
     replaces = preset and preset.replaces,
     kind = preset and preset.kind,
     added = preset and preset.added,
+    asRear = preset and preset.asRear or nil,
     mountRef = preset and preset.mountRef,
     presetMove = preset and preset.move,
     autoMove = preset and preset.auto and preset.move,
@@ -5503,8 +5796,13 @@ local function spawnGhost(model, partName, target, preset)
   if type(preset) == 'table' and type(preset.cut) == 'table' and not frontEnd then
     config.partAttacher.partCut = deepcopy(preset.cut)
   end
-  -- a scaled part: the preview is built at that size (around the pivot the part keeps)
-  config.partAttacher.scale = type(preset) == 'table' and S.extraScale(preset) or nil
+  -- a scaled part: the preview is built at that size (around the pivot the part keeps); a scaled
+  -- suspension without its wheels growing (S.scaleSwapTree)
+  if type(preset) == 'table' and preset.mode == 'partswap' then
+    config.partAttacher.swapScale = S.extraScale(preset) or nil
+  else
+    config.partAttacher.scale = type(preset) == 'table' and S.extraScale(preset) or nil
+  end
   -- only the engine preview keeps its powertrain (its data feeds the swap message)
   if type(preset) == 'table' and preset.mode == 'engine' then config.partAttacher.keepPowertrain = true end
   if S.copyPaintPtr[0] then
@@ -5547,15 +5845,20 @@ local function spawnGearboxGhost(model, gearboxPart, target)
 end
 
 -- ghost of a donor suspension, placed where the car's suspension on that side sits
-local function spawnPartSwapGhost(model, partName, target, kind)
+-- asRear: a front suspension going to the rear (kind susp_R), placed where the car's rear one is
+local function spawnPartSwapGhost(model, partName, target, kind, asRear)
   if swapKinds[kind] and swapKinds[kind].added then
-    -- a second rear axle: its preview goes 1.3 m behind the car's rear suspension
-    local ref = getTargetSuspension(target:getID(), 'susp_R')
+    -- an added axle: its preview goes 1.3 m behind the car's rear suspension per axle (the third
+    -- 2.6 m...), a second front axle 1.3 m behind the car's front one (a twin steer truck)
+    local k = swapKinds[kind]
+    local ref = getTargetSuspension(target:getID(), k.front and 'susp_F' or 'susp_R')
     local ioCtx = vehicleIoCtx(target:getID())
     local tc = ref and ioCtx and partNodeCentroid(jbeamIO.getPart(ioCtx, ref))
     local dc = rawNodeCentroid(model, partName)
-    local move = (tc and dc) and (tc + vec3(0, 1.3, 0) - dc) or vec3()
-    return spawnGhost(model, partName, target, {mode = 'partswap', kind = kind, added = true, mountRef = ref, move = {move.x, move.y, move.z}, rot = {0, 0, 0}})
+    local behind = k.front and 1.3 or 1.3 * ((k.rear or 2) - 1)
+    local move = (tc and dc) and (tc + vec3(0, behind, 0) - dc) or vec3()
+    return spawnGhost(model, partName, target, {mode = 'partswap', kind = kind, added = true, mountRef = ref, move = {move.x, move.y, move.z}, rot = {0, 0, 0},
+      asRear = (asRear and not k.front) or nil})
   end
   local isSub = swapKinds[kind] and swapKinds[kind].subframe
   local replaces = getTargetSuspension(target:getID(), kind)
@@ -5573,7 +5876,8 @@ local function spawnPartSwapGhost(model, partName, target, kind)
   local tc = S.carPartCentroid(target:getID(), ioCtx, replaces)
   local dc = rawNodeCentroid(model, partName)
   local move = (tc and dc) and (tc - dc) or vec3()
-  spawnGhost(model, partName, target, {mode = 'partswap', kind = kind, replaces = replaces, move = {move.x, move.y, move.z}, rot = {0, 0, 0}})
+  spawnGhost(model, partName, target, {mode = 'partswap', kind = kind, replaces = replaces, move = {move.x, move.y, move.z}, rot = {0, 0, 0},
+    asRear = asRear or nil})
 end
 
 local function removePartSwap(target, kind)
@@ -7711,6 +8015,7 @@ S.respawnGhost = function(e, meshOnly)
   if e.mode == 'partswap' then
     -- a swap preview stays one (its "comes with" list changed)
     preset.mode, preset.kind, preset.replaces, preset.added, preset.mountRef = 'partswap', e.kind, e.replaces, e.added, e.mountRef
+    preset.asRear = e.asRear
   end
   if e.perAxisPtr[0] then
     preset.scale = S.scaleValue(e.scaleAxis[1][0], e.scaleAxis[2][0], e.scaleAxis[3][0])
@@ -8946,10 +9251,47 @@ local function drawSpawnSection(player)
     if im.IsItemHovered() then im.SetTooltip('Tavo pakabos geometrija lieka, perkeliami donoro spyruokliu, amortizatoriu ir stabilizatoriaus standumai. Niekas nelus. Koreguok 5 dalyje.') end
   end
   if S.selectedIsEngine == 'susp_R' then
-    if im.Button('PRIDETI KAIP ANTRA GALINE ASI (6 ratai): ' .. tostring(S.selectedPartName), im.ImVec2(-1, 0)) and player then
-      spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, 'susp_R2')
+    -- the next free rear axle: the second, then the third... up to 5 rear axles in all
+    local nextKind
+    for _, k in ipairs({'susp_R2', 'susp_R3', 'susp_R4', 'susp_R5'}) do
+      if not (player and getPartSwap(player:getID(), k)) then nextKind = k break end
     end
-    if im.IsItemHovered() then im.SetTooltip('Tavo galine pakaba lieka, si atsiranda uz jos kaip antra asis (pvz. 6x4 sunkvezimis). Abi asys varomos universaliomis pavaromis.') end
+    if not nextKind then
+      imText('Jau 5 galines asys - daugiau nepridedama.')
+    elseif nextKind == 'susp_R2' then
+      if im.Button('PRIDETI KAIP ANTRA GALINE ASI (6 ratai): ' .. tostring(S.selectedPartName), im.ImVec2(-1, 0)) and player then
+        spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, nextKind)
+      end
+      if im.IsItemHovered() then im.SetTooltip('Tavo galine pakaba lieka, si atsiranda uz jos kaip antra asis (pvz. 6x4 sunkvezimis). Abi asys varomos universaliomis pavaromis.') end
+    else
+      if im.Button(string.format('PRIDETI KAIP KITA GALINE ASI (%s): %s', swapKinds[nextKind].label, tostring(S.selectedPartName)), im.ImVec2(-1, 0)) and player then
+        spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, nextKind)
+      end
+      if im.IsItemHovered() then im.SetTooltip('Dar viena galine asis uz ankstesniu (iki 5). Ji gali kabeti ir ant pridetos detales remo ar kitos pridetos asies, jei masinos kebulas per toli. Visos galines asys varomos universaliomis pavaromis.') end
+    end
+  elseif S.selectedIsEngine == 'susp_F' then
+    -- a front suspension at the rear (an IFS for off-road instead of a solid rear axle)
+    if im.Button('NAUDOTI KAIP GALINE PAKABA: ' .. tostring(S.selectedPartName), im.ImVec2(-1, 0)) and player then
+      spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, 'susp_R', true)
+    end
+    if im.IsItemHovered() then im.SetTooltip('Si priekine pakaba stoja vietoj tavo galines: jos ratai tampa galiniais ir varomi kaip galiniai, vairas uzrakinamas tiesiai. Pvz. nepriklausoma pakaba vietoj tilto bekelei.') end
+    -- ...or as one more rear axle (the second, third... up to 5 rear axles in all)
+    local nextRear
+    for _, k in ipairs({'susp_R2', 'susp_R3', 'susp_R4', 'susp_R5'}) do
+      if not (player and getPartSwap(player:getID(), k)) then nextRear = k break end
+    end
+    if nextRear then
+      if im.Button(string.format('PRIDETI KAIP KITA GALINE ASI (%s, priekine kaip galine): %s', swapKinds[nextRear].label, tostring(S.selectedPartName)), im.ImVec2(-1, 0)) and player then
+        spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, nextRear, true)
+      end
+      if im.IsItemHovered() then im.SetTooltip('Si priekine pakaba atsiranda uz tavo galiniu asiu kaip dar viena galine asis (iki 5): jos ratai varomi kaip galiniai, vairas uzrakinamas tiesiai.') end
+    end
+    if not (player and getPartSwap(player:getID(), 'susp_F2')) then
+      if im.Button('PRIDETI KAIP ANTRA PRIEKINE ASI: ' .. tostring(S.selectedPartName), im.ImVec2(-1, 0)) and player then
+        spawnPartSwapGhost(S.selectedModel, S.selectedPartName, player, 'susp_F2')
+      end
+      if im.IsItemHovered() then im.SetTooltip('Tavo priekine pakaba lieka, si atsiranda uz jos kaip antra priekine asis (pvz. 8x4 sunkvezimis) ir sukasi su vairu savo vairo cilindrais. Varoma tik su FWD ar AWD pavaromis.') end
+    end
   end
 end
 
@@ -9074,9 +9416,12 @@ local function drawGhostSection()
   sliderRow('Pasvirimas (X)', e.rot[1], 5, -180, 180, '%.1f deg')
   sliderRow('Pokrypis (Y)', e.rot[2], 5, -180, 180, '%.1f deg')
   sliderRow('Pasukimas (Z)', e.rot[3], 5, -180, 180, '%.1f deg')
-  if e.mode == 'part' or e.mode == 'meshonly' then
+  if e.mode == 'part' or e.mode == 'meshonly' or e.mode == 'partswap' then
     -- size: one factor for all axes, or one per axis (width X, length Y, height Z); the preview is
-    -- built again at the new size once a slider / field is let go
+    -- built again at the new size once a slider / field is let go. A suspension (part swap) grows
+    -- without its wheels (S.scaleSwapTree)
+    local isSusp = e.mode == 'partswap'
+    if isSusp then imText('Pakabos dydis: ratai lieka savo dydzio, didinama tik pakaba.') end
     local apply = false
     if im.Checkbox('Dydis atskirai X / Y / Z', e.perAxisPtr) then
       if e.perAxisPtr[0] then
@@ -9086,14 +9431,20 @@ local function drawGhostSection()
         apply = true
       end
     end
-    if im.IsItemHovered() then im.SetTooltip('Plotis, ilgis ir aukstis atskirai (pvz. platesnis buferis, ne aukstesnis).') end
+    if im.IsItemHovered() then
+      im.SetTooltip(isSusp and 'Plotis, ilgis ir aukstis atskirai (pvz. platesne vaze - tik X, aukstesne pakaba - tik Z).'
+        or 'Plotis, ilgis ir aukstis atskirai (pvz. platesnis buferis, ne aukstesnis).')
+    end
     if e.perAxisPtr[0] then
       if S.scaleRow('Plotis (X)', e.scaleAxis[1]) then apply = true end
       if S.scaleRow('Ilgis (Y)', e.scaleAxis[2]) then apply = true end
       if S.scaleRow('Aukstis (Z)', e.scaleAxis[3]) then apply = true end
     else
       if S.scaleRow('Dydis (scale)', e.scale) then apply = true end
-      if im.IsItemHovered() then im.SetTooltip('Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.') end
+      if im.IsItemHovered() then
+        im.SetTooltip(isSusp and 'Pakaba (svirtys, amortizatoriai, stebules) padideja / sumazeja apie savo centra, ratai ir stabdziai lieka tokio pat dydzio ir tik pasislenka kartu su stebulemis. Atleidus slankikli perziura persikrauna.'
+          or 'Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.')
+      end
     end
     local b = e.builtScale
     if math.abs(b[1] - 1) > 1e-4 or math.abs(b[2] - 1) > 1e-4 or math.abs(b[3] - 1) > 1e-4 then
@@ -9163,11 +9514,14 @@ local function drawGhostSection()
     if im.IsItemHovered() then im.SetTooltip('Stumdyk perziura, kad modelis tilptu i variklio skyriu. Isjungus - lieka tavo variklio modelis, keiciasi tik galia ir garsas.') end
   elseif isPartSwap then
     local label = swapKinds[e.kind] and swapKinds[e.kind].label or tostring(e.kind)
-    if e.added then
+    if e.added and e.kind == 'susp_R2' then
       imText('ANTRA GALINE ASIS: bus prideta uz esamos galines pakabos (pastumk Y, kad stovetu kur reikia).')
+    elseif e.added then
+      imText(string.format('%s: bus prideta (pastumk Y, kad stovetu kur reikia).', label:upper()))
     else
       imText(label:upper() .. ' SWAP: ' .. tostring(e.replaces) .. ' bus pakeista sita.')
     end
+    if e.asRear then imText('Priekine pakaba kaip galine: jos ratai tampa galiniais, vairas uzrakinamas tiesiai.') end
     imText('Kartu keliauja ratai, stebules, amortizatoriai, stabdziai, vairavimas.')
     imText('Virinama tik per donoro tvirtinimo taskus - svirtys lieka judancios.')
     im.Checkbox('Jei ratai nebus varomi - ijungti universalias pavaras', S.autoDrivetrainPtr)
@@ -9249,7 +9603,7 @@ local function drawInstalledSection(player)
     if im.SmallButton('Grazinti originalu##radswap') then S.removeRadiator(player) end
   end
   local anySwap = swap or type(gbSwap) == 'table' or type(radSwap) == 'table' or type(fiSwap) == 'table'
-  for _, kind in ipairs({'sub_F', 'sub_R', 'susp_F', 'susp_R', 'susp_R2'}) do
+  for _, kind in ipairs({'sub_F', 'sub_R', 'susp_F', 'susp_F2', 'susp_R', 'susp_R2', 'susp_R3', 'susp_R4', 'susp_R5'}) do
     local ps = getPartSwap(player:getID(), kind)
     if ps then
       anySwap = true
@@ -9257,6 +9611,14 @@ local function drawInstalledSection(player)
         imText(string.format('%s: %s (is %s), prideta', swapKinds[kind].label, tostring(ps.part), tostring(ps.model)))
       else
         imText(string.format('%s: %s (is %s), vietoj %s', swapKinds[kind].label, tostring(ps.part), tostring(ps.model), tostring(ps.replaces)))
+      end
+      if ps.asRear then
+        im.SameLine()
+        imText('(priekine kaip galine)')
+      end
+      if ps.scale ~= nil then
+        im.SameLine()
+        imText(S.scaleLabel(ps.scale))
       end
       im.SameLine()
       if im.SmallButton('Perkelti##' .. kind) then editPartSwap(player, kind) end
@@ -12329,6 +12691,21 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
             t.triangleType = 'NONCOLLIDABLE'
           end
         end
+        -- a front suspension at the rear steers no more: its steering cylinders (and a steering
+        -- box's torsion hydros) take an input nothing sets, so they hold their middle length
+        if spec.asRear then
+          local locked = 0
+          for _, sec in ipairs({'hydros', 'torsionHydros'}) do
+            for _, h in pairs(type(vehicle[sec]) == 'table' and vehicle[sec] or {}) do
+              if type(h) == 'table' and (subtreeSet[h.id1] or subtreeSet[h.id2])
+                and (h.inputSource == nil or h.inputSource == 'steering' or h.inputSource == 'steering_input') then
+                h.inputSource = 'upa_rear_locked'
+                locked = locked + 1
+              end
+            end
+          end
+          log('I', logTag, string.format('part swap %s: a front suspension at the rear - %d steering cylinders hold it straight', kind, locked))
+        end
         -- donor springs pre-load slowly instead of kicking at spawn
         local ramped = 0
         for _, b in pairs(vehicle.beams or {}) do
@@ -12355,7 +12732,17 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
         local outerVisual = {}
         for _, name in ipairs(outer and outer.visualNames or {}) do outerVisual[outerPrefix .. name] = true end
         local function isBody(n)
-          if isExtraName(n) or inSubtree(n) then return false end
+          if inSubtree(n) then return false end
+          -- an added axle (3rd, 4th, 5th rear axle...) may sit behind the car's body: it hangs on an
+          -- added part with physics (a long frame) or on another swap's frame where the body is out
+          -- of reach (weldEachToNearest takes the car's chassis first when it is close)
+          if spec.added and type(n.name) == 'string' and not n.upaCut then
+            if swapStructure[n.name] then return true end
+            local j = tonumber(n.name:match('^upa(%d+)_'))
+            local ex = j and type(marker.extraParts) == 'table' and marker.extraParts[j]
+            if type(ex) == 'table' and not ex.meshOnly and not ex.dataOnly then return true end
+          end
+          if isExtraName(n) then return false end
           if not inAnySwap(n) then return true end
           if not outer or outerVisual[n.name] then return false end
           return n.partOrigin == outerAlias or (type(n.name) == 'string' and n.name:sub(1, #outerPrefix) == outerPrefix)
