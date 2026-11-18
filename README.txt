@@ -9,7 +9,7 @@ publish this mod as your own without the author's permission.
 |  Support it with a coffee:  https://buymeacoffee.com/giedrelis             |
 |  Every coffee = more features and faster fixes. Thank you!                 |
 +----------------------------------------------------------------------------+
-
+For bug reporting and more > https://discord.gg/7fZnw9M8p
 WHAT IT DOES
 ------------
 - Put any part (bumpers, fenders, bars, lights...) from any vehicle - official or
