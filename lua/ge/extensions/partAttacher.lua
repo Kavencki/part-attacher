@@ -49,7 +49,7 @@ end
 -- "##id" endings stay as they are. Results are cached.
 --------------------------------------------------------------------------------
 
-S.version = 'v1.4.6 beta'
+S.version = 'v1.5 beta'
 S.settingsFile = '/settings/partAttacher/settings.json'
 S.langCodes = {'en', 'lt', 'de', 'es', 'it', 'ru', 'zh', 'ja'}
 S.lang = 'en' -- English by default
@@ -272,6 +272,18 @@ local function getVeh(id)
   return id and getObjectByID(id) or nil
 end
 
+-- deletes one of the mod's vehicles (a preview, a part picture's ghost) and makes sure the game
+-- forgets it. The game drops a deleted vehicle from its lists only after every mod's
+-- onVehicleDestroyed has run: one mod failing there (sddf82's screenDimmer: "attempt to index
+-- global 'discovered'") left the deleted ghost in the list, and the game's own aero then called
+-- it every frame - an error a frame while part pictures were taken.
+S.deleteVeh = function(veh)
+  if not veh then return end
+  veh:delete()
+  pcall(invalidatePlayerVehicles)
+  pcall(invalidateVehicleCache)
+end
+
 local function getVData(id)
   local d = core_vehicle_manager.getVehicleData(id)
   return d and d.vdata
@@ -280,6 +292,9 @@ end
 local function imText(s)
   im.Text((L(tostring(s)):gsub('%%', '%%%%')))
 end
+
+-- a text for ImGui's printf-like Text / BulletText / TextColored: its "%" shown as they are
+S.esc = function(s) return (tostring(s):gsub('%%', '%%%%')) end
 
 local function isWheelNode(vdata, cid)
   local n = vdata and vdata.nodes and vdata.nodes[cid]
@@ -573,6 +588,12 @@ local function renamePartRefs(part, prefix, names, stripExternal, aliasMap)
   part.refNodes = nil
   part.cameraExternal = nil
   part.cameraChase = nil
+  -- the onboard cameras too (hood, driver, dash...): a donor's chassis / body brings its own "hood"
+  -- camera on its own points - a second "hood" on the car (the game keeps one of them, often the
+  -- donor's, hanging on points that may be cut off or far from the car's front)
+  part.camerasInternal = nil
+  part.camerasRelative = nil
+  if type(part.cameras) == 'table' then part.cameras = nil end
 end
 
 -- names is shared by an extra part and its sub parts, so a sub part's references to its parent's
@@ -924,7 +945,7 @@ end
 local function buildMeshSwapEngine(ioCtx, spec)
   local part, filename = origGetPart(ioCtx, spec.replaces)
   if type(part) ~= 'table' or spec.meshSwap == false then return part, filename end
-  local donor = origGetPart(ioCtx, spec.part)
+  local donor, donorFile = origGetPart(ioCtx, spec.part)
   if type(donor) ~= 'table' or type(donor.flexbodies) ~= 'table' then return part, filename end
 
   local groups = partNodeGroups(part)
@@ -950,8 +971,224 @@ local function buildMeshSwapEngine(ioCtx, spec)
     end
   end
   fb[#fb + 1] = {nodeMove = '', nodeRotate1 = ''}
-  if meshes > 0 then part.flexbodies = fb end
+  if meshes > 0 then
+    part.flexbodies = fb
+    -- the donor's spinning pulleys and belt tensioners are props, not meshes: they come too, on the
+    -- car's block nodes, placed with the donor mesh (the car's own engine props went with its mesh)
+    local okP, res = pcall(S.swapEngineProps, part, donor, donorFile, spec, groups)
+    if not okP then log('W', logTag, 'engine swap props: ' .. tostring(res)) end
+    -- a resized engine: its model (block, pulleys) grows / shrinks around the preview's pivot, before
+    -- the move / turn; the physics stay the car's block
+    local sc = S.extraScale(spec)
+    if sc then S.scalePart({flexbodies = part.flexbodies}, sc) end
+  end
   return part, filename
+end
+
+-- the game turns a prop's place with the jbeam move / turn, never the prop itself: a turned (or
+-- resized) swapped engine gets its pulleys as plain meshes on the block (turned and sized like it,
+-- they just don't spin); an engine as it sat on its donor keeps them spinning (props)
+S.swapPropsStatic = function(spec)
+  local rt = type(spec) == 'table' and type(spec.rot) == 'table' and spec.rot or {}
+  for i = 1, 3 do
+    if math.abs(tonumber(rt[i]) or 0) > 0.5 then return true end
+  end
+  return S.extraScale(spec) ~= nil
+end
+
+-- a resized swapped engine with "power by size" on: its torque (and so its kW at every rpm) goes
+-- with the engine's volume - a bigger block, a bigger displacement (x1.30 all round = x2.20).
+-- 1 at the real size or with it off; kept within x0.05 .. x25
+S.enginePowerFactor = function(spec)
+  if type(spec) ~= 'table' or spec.scalePower == false or spec.scale == nil then return 1 end
+  local x, y, z = S.scaleAxes(spec.scale)
+  return math.min(25, math.max(0.05, x * y * z))
+end
+
+-- in the loaded car: the combustion engine's torque curve and its intake / exhaust torque additions
+-- times k (a turbo / supercharger boosts that torque, so they follow; nitrous adds its own fixed
+-- power); the torque multiplier curve stays (it is a factor). Its friction and engine braking go
+-- with it, so a shrunk engine still idles. Returns how many curve points changed.
+S.scaleEngineTorque = function(vehicle, k)
+  local name
+  for _, d in pairs(type(vehicle.powertrain) == 'table' and vehicle.powertrain or {}) do
+    if type(d) == 'table' and d.type == 'combustionEngine' and type(d.name) == 'string' and (not name or d.name == 'mainEngine') then name = d.name end
+  end
+  local sections = {}
+  if name and type(vehicle[name]) == 'table' then sections[#sections + 1] = vehicle[name] end
+  for _, d in pairs(type(vehicle.powertrain) == 'table' and vehicle.powertrain or {}) do
+    if type(d) == 'table' and d.name == name then sections[#sections + 1] = d end -- inline device options
+  end
+  local n = 0
+  for _, sec in ipairs(sections) do
+    for _, key in ipairs({'friction', 'dynamicFriction', 'engineBrakeTorque'}) do
+      if type(sec[key]) == 'number' then sec[key] = sec[key] * k end
+    end
+    for _, key in ipairs({'torque', 'torqueModIntake', 'torqueModExhaust'}) do
+      local t = sec[key]
+      if type(t) == 'table' and type(t[1]) == 'table' then
+        local col = 2
+        for i, h in ipairs(t[1]) do
+          if h == 'torque' then col = i end
+        end
+        for i = 2, #t do
+          local row = t[i]
+          if type(row) == 'table' and type(row[col]) == 'number' then
+            row[col] = row[col] * k
+            n = n + 1
+          end
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- the models of a props section as flexbody rows hung on these node groups (lights left out)
+S.propMeshRows = function(props, groups)
+  local rows = {}
+  if type(props) ~= 'table' or type(props[1]) ~= 'table' then return rows end
+  local col
+  for i, h in ipairs(props[1]) do
+    if h == 'mesh' then col = i end
+  end
+  if not col then return rows end
+  for i = 2, #props do
+    local mesh = type(props[i]) == 'table' and props[i][col]
+    if type(mesh) == 'string' and mesh ~= '' and mesh ~= 'SPOTLIGHT' and mesh ~= 'POINTLIGHT' then
+      rows[#rows + 1] = {mesh, deepcopy(groups)}
+    end
+  end
+  return rows
+end
+
+-- a resized preview: its props (pulleys, fans...) would stay at their full size and place (the game
+-- does not size props): as plain meshes on the part's own node groups they grow with it
+S.propsToMeshes = function(part)
+  if type(part) ~= 'table' or type(part.props) ~= 'table' then return end
+  local groups = partNodeGroups(part)
+  if #groups == 0 then return end
+  local rows = S.propMeshRows(part.props, groups)
+  if #rows == 0 then return end
+  if type(part.flexbodies) ~= 'table' or type(part.flexbodies[1]) ~= 'table' then
+    part.flexbodies = {{'mesh', '[group]:', 'nonFlexMaterials'}}
+  end
+  for _, row in ipairs(rows) do part.flexbodies[#part.flexbodies + 1] = row end
+  -- the lights stay props (S.scalePart sizes them)
+  local col
+  for i, h in ipairs(part.props[1]) do
+    if h == 'mesh' then col = i end
+  end
+  local keep, lights = {part.props[1]}, 0
+  for i = 2, #part.props do
+    local row = part.props[i]
+    local mesh = type(row) == 'table' and col and row[col]
+    if type(row) == 'table' and row[1] == nil then
+      keep[#keep + 1] = row
+    elseif mesh == 'SPOTLIGHT' or mesh == 'POINTLIGHT' then
+      keep[#keep + 1] = row
+      lights = lights + 1
+    end
+  end
+  part.props = lights > 0 and keep or nil
+end
+
+-- the points of a raw part: name -> vec3, and a list {name, pos}
+S.rawNodePositions = function(p)
+  local byName, list = {}, {}
+  for _, row in ipairs(type(p) == 'table' and type(p.nodes) == 'table' and p.nodes or {}) do
+    if type(row) == 'table' and type(row[1]) == 'string' and type(row[2]) == 'number' and type(row[3]) == 'number' and type(row[4]) == 'number' then
+      local pos = vec3(row[2], row[3], row[4])
+      byName[row[1]] = pos
+      list[#list + 1] = {name = row[1], pos = pos}
+    end
+  end
+  return byName, list
+end
+
+-- a donor props section on the car's engine block: every prop's three nodes (idRef, idX, idY) are
+-- the car's block nodes of the same name when its block has them (engines mostly name them alike:
+-- e3l, e3r, e4l), else the block node nearest to where the donor's one sits (moved like the donor
+-- mesh). Returns the new rows (header first) and how many props came, or nil.
+-- carByName / carList: the car's block points (S.rawNodePositions); donorPos: name -> vec3 of the
+-- donor's; mv: the donor mesh's move {x, y, z}
+S.remapSwapProps = function(props, carByName, carList, donorPos, mv)
+  if type(props) ~= 'table' or type(props[1]) ~= 'table' or #carList < 3 then return nil, 0 end
+  local cols = {}
+  for i, h in ipairs(props[1]) do
+    if h == 'idRef:' or h == 'idX:' or h == 'idY:' then cols[#cols + 1] = i end
+  end
+  if #cols ~= 3 then return nil, 0 end
+  local move = vec3(mv[1] or 0, mv[2] or 0, mv[3] or 0)
+  local function pick(name, used)
+    if type(name) ~= 'string' then return nil end
+    if carByName[name] and not used[name] then return name end
+    local p = donorPos[name]
+    if not p then return nil end
+    p = p + move
+    local best, bestD = nil, math.huge
+    for _, n in ipairs(carList) do
+      if not used[n.name] then
+        local d = (n.pos - p):squaredLength()
+        if d < bestD then best, bestD = n.name, d end
+      end
+    end
+    return best
+  end
+  local out, count = {deepcopy(props[1])}, 0
+  for i = 2, #props do
+    local row = props[i]
+    if type(row) == 'table' and type(row[1]) == 'string' then
+      local copy, used, ok = deepcopy(row), {}, true
+      for _, c in ipairs(cols) do
+        local n = pick(row[c], used)
+        if not n then ok = false break end
+        copy[c] = n
+        used[n] = true
+      end
+      if ok then
+        out[#out + 1] = copy
+        count = count + 1
+      end
+    elseif type(row) == 'table' then
+      out[#out + 1] = deepcopy(row) -- property rows of the donor's list
+    end
+  end
+  return out, count
+end
+
+-- the donor engine's props in the car's engine part (see buildMeshSwapEngine); the donor's points
+-- and its folder are kept for its tuning parts' props (prepareTuneParts)
+S.swapDonorPos, S.swapDaeDir = {}, {}
+S.swapEngineProps = function(part, donor, donorFile, spec, groups)
+  local donorPos = S.rawNodePositions(donor)
+  local carByName, carList = S.rawNodePositions(part)
+  local dir = type(donorFile) == 'string' and donorFile:match('^(.*/)') or ''
+  S.swapDonorPos[tostring(spec.part)] = donorPos
+  S.swapDaeDir[tostring(spec.part)] = dir
+  if S.swapPropsStatic(spec) then
+    -- turned / resized: the pulleys as meshes on the block, in front of the list's reset row
+    local rows = S.propMeshRows(donor.props, groups or {})
+    local fb = part.flexbodies
+    for _, row in ipairs(rows) do table.insert(fb, #fb, row) end
+    part.props = nil
+    log('I', logTag, string.format('engine swap: %d donor props (pulleys...) as fixed meshes (the engine is turned or resized)', #rows))
+    return
+  end
+  local mv, rt, pv = spec.move or {0, 0, 0}, spec.rot or {0, 0, 0}, spec.pivot or {0, 0, 0}
+  local rows, count = S.remapSwapProps(donor.props, carByName, carList, donorPos, mv)
+  if not rows or count == 0 then
+    part.props = nil
+    return
+  end
+  -- marked like an added part's props (S.placeExtraProps gives them their model-file pivot), moved
+  -- and turned like the donor mesh; the model file is looked for in the donor's folder first
+  table.insert(rows, 2, {upaPropFix = true, upaScale = '', upaDaeDir = dir,
+    nodeMove = {x = mv[1], y = mv[2], z = mv[3]},
+    nodeRotate1 = {x = rt[1], y = rt[2], z = rt[3], px = pv[1], py = pv[2], pz = pv[3]}})
+  rows[#rows + 1] = {upaPropFix = '', upaScale = '', upaDaeDir = '', nodeMove = '', nodeRotate1 = ''}
+  part.props = rows
+  log('I', logTag, string.format('engine swap: %d donor props (pulleys...) on the car\'s block', count))
 end
 
 local tuneSlotPrefix = 'upat_' -- donor engine tuning slots inside the car's engine part
@@ -1067,7 +1304,101 @@ local function buildLogicEngine(ioCtx, spec)
   part.slots2 = slots
   part.slots = nil
   log('I', logTag, string.format('engine logic swap: %d donor tuning slots in %s', added, tostring(spec.replaces)))
+  local okUi, errUi = pcall(S.noteEngineUi, ioCtx, spec, donor, slots)
+  if not okUi then log('W', logTag, 'engine swap parts menu names: ' .. tostring(errUi)) end
   return part, filename
+end
+
+-- the parts menu takes a part's name and its slots' names from the jbeam files as they were read:
+-- after a logic swap the engine row still said the car's old engine ("2.0L I4 Diesel Engine") and the
+-- donor's tuning slots showed their raw names ("upat_bastion_v8_ecu"). Noted per load (the vehicle's
+-- ioCtx, which the menu reads with) and handed to the menu by S.wrappedAvailableParts: the donor
+-- engine's own name, every slot of the swapped engine with its real name ("Engine Management").
+-- The slot ids themselves keep the prefix (the unify step finds the donor's tuning parts by it).
+S.engineUi = setmetatable({}, {__mode = 'k'})
+S.noteEngineUi = function(ioCtx, spec, donor, slots)
+  if type(ioCtx) ~= 'table' or type(spec) ~= 'table' or type(spec.replaces) ~= 'string' then return end
+  local info = type(donor) == 'table' and type(donor.information) == 'table' and donor.information or {}
+  local slotUi = {}
+  for _, s in ipairs(type(slots) == 'table' and slots or {}) do
+    local name = type(s) == 'table' and (s.name or s.type)
+    if type(name) == 'string' then
+      local desc = s.description
+      if type(desc) ~= 'string' or desc == '' then
+        -- no description of its own: its name without our prefix and the donor's model, readable
+        local short = name
+        if short:sub(1, #tuneSlotPrefix) == tuneSlotPrefix then short = short:sub(#tuneSlotPrefix + 1) end
+        if type(spec.model) == 'string' and spec.model ~= '' and short:sub(1, #spec.model + 1) == spec.model .. '_' then
+          short = short:sub(#spec.model + 2)
+        end
+        short = short:gsub('_', ' ')
+        desc = short:sub(1, 1):upper() .. short:sub(2)
+      end
+      slotUi[name] = {name = name, type = s.type, allowTypes = s.allowTypes, denyTypes = s.denyTypes,
+        description = desc, coreSlot = s.coreSlot}
+    end
+  end
+  S.engineUi[ioCtx] = S.engineUi[ioCtx] or {}
+  S.engineUi[ioCtx][spec.replaces] = {
+    description = type(info.name) == 'string' and info.name ~= '' and info.name or nil,
+    slotInfoUi = slotUi,
+  }
+end
+
+-- jbeamIO.getAvailableParts, for the parts menu: a swapped engine's entry shows the donor's names
+-- (a copy: the game's cached entry stays as it is, the same model without a swap shows its own)
+-- (an entry: description / slotInfoUi replace the part's; addSlots joins its slot list (the main
+-- part's added slots); create: a made-up part no file has - an added part's alias - is listed too)
+S.wrappedAvailableParts = function(ioCtx, ...)
+  local res = S.origAvailableParts(ioCtx, ...)
+  local ui = type(ioCtx) == 'table' and S.engineUi[ioCtx]
+  if type(res) ~= 'table' or not ui then return res end
+  for partName, names in pairs(ui) do
+    local entry = res[partName]
+    if type(entry) ~= 'table' and names.create then entry = {description = partName, authors = ''} end
+    if type(entry) == 'table' then
+      local copy = {}
+      for k, v in pairs(entry) do copy[k] = v end
+      copy.description = names.description or copy.description
+      copy.slotInfoUi = names.slotInfoUi or copy.slotInfoUi
+      if type(names.addSlots) == 'table' then
+        local slots = {}
+        for k, v in pairs(type(copy.slotInfoUi) == 'table' and copy.slotInfoUi or {}) do slots[k] = v end
+        for k, v in pairs(names.addSlots) do slots[k] = v end
+        copy.slotInfoUi = slots
+      end
+      res[partName] = copy
+    end
+  end
+  return res
+end
+
+-- the parts menu's names of an added part (S.wrappedAvailableParts): noted per load
+S.noteUi = function(ioCtx, partName, entry)
+  if type(ioCtx) ~= 'table' or type(partName) ~= 'string' then return end
+  S.engineUi[ioCtx] = S.engineUi[ioCtx] or {}
+  local cur = S.engineUi[ioCtx][partName] or {}
+  for k, v in pairs(entry) do
+    if k == 'addSlots' and type(cur.addSlots) == 'table' then
+      for sk, sv in pairs(v) do cur.addSlots[sk] = sv end
+    else
+      cur[k] = v
+    end
+  end
+  S.engineUi[ioCtx][partName] = cur
+end
+
+-- a slot list (slots2) as the parts menu takes it: name -> {name, allowTypes, denyTypes, description}
+S.slotUiOf = function(slots)
+  local out = {}
+  for _, s in ipairs(type(slots) == 'table' and slots or {}) do
+    local name = type(s) == 'table' and (s.name or s.type)
+    if type(name) == 'string' then
+      out[name] = {name = name, type = s.type, allowTypes = s.allowTypes, denyTypes = s.denyTypes,
+        description = s.description, coreSlot = s.coreSlot}
+    end
+  end
+  return out
 end
 
 --------------------------------------------------------------------------------
@@ -1952,6 +2283,7 @@ local function wrappedGetPart(ioCtx, partName)
     local okS, part, filename = pcall(wrappedGetPart, ioCtx, partName)
     ctx.scaleBusy = false
     if okS then
+      pcall(S.propsToMeshes, part)
       S.scalePart(part, ctx.ghostScale)
       return part, filename
     end
@@ -1973,6 +2305,12 @@ local function wrappedGetPart(ioCtx, partName)
   end
   if ctx and ctx.meshSwap and partName == ctx.meshSwap.replaces then
     return buildLogicEngine(ioCtx, ctx.meshSwap)
+  end
+  -- an interior swap: the car's steering wheel / shifter / seat wearing the donor's models
+  if ctx and type(ctx.interior) == 'table' and ctx.interior[partName] then
+    local okI, part, filename = pcall(S.buildInteriorPart, ioCtx, partName, ctx.interior[partName])
+    if okI and part then return part, filename end
+    log('E', logTag, 'interior swap of ' .. tostring(partName) .. ' failed: ' .. tostring(part))
   end
   if ctx and ctx.swap and (partName == ctx.swap.replaces or partName == swapAlias) then
     return buildSwapEngine(ioCtx, ctx.swap)
@@ -2011,7 +2349,7 @@ local function wrappedGetPart(ioCtx, partName)
         part.partName = partName
         part.slotType = extraSlotType
         -- the nodes its props (gauge needles) hang on, from its car where the part lacks them
-        if not ex.meshOnly and type(ex.frontEnd) ~= 'table' then pcall(S.addPropAnchors, part, ex.model, idx) end
+        if not ex.meshOnly and type(ex.frontEnd) ~= 'table' then pcall(S.addPropAnchors, part, ex.model, idx, ctx.names[idx]) end
         S.scalePart(part, S.extraScale(ex))
         S.tagExtraProps(part, S.extraScale(ex))
         S.shiftPartTransforms(part) -- its own offsets act before the extra slot's move / rotate
@@ -2021,8 +2359,16 @@ local function wrappedGetPart(ioCtx, partName)
         if type(ex.frontEnd) == 'table' then S.renameExtraControllers(part, 'upa' .. idx .. '_')
         else S.renameExtraControllers(part, 'upa' .. idx .. '_', S.isGaugeDisplay) end
         if ex.noLogic then S.stripPartLogic(part, idx) end
+        -- a second engine: its engine data apart (its torque goes onto the car's engine in Phase2),
+        -- its devices / sounds / controllers stay out
+        if ex.engine2 and not ex.meshOnly then S.prepareEngine2Part(part, idx) end
         S.stripCouplerImports(part, idx)
         S.noteExtraDevices(part, idx)
+        -- the parts menu: the donor part's own name and its slots' names (ECU, intake...)
+        local info = type(part.information) == 'table' and part.information or {}
+        pcall(S.noteUi, ioCtx, partName, {create = true,
+          description = (ex.engine2 and 'Second engine: ' or '') .. tostring(info.name or ex.part),
+          slotInfoUi = S.slotUiOf(part.slots2 or part.slots)})
       end
       return part, filename
     end
@@ -2043,10 +2389,18 @@ local function wrappedGetPart(ioCtx, partName)
       -- added swap slots (second rear axle) before the extra slots: the extras must stay last (below)
       S.addSwapSlots(part, ctx.partSwaps)
       addExtraSlots(part, ctx.extras)
+      -- the parts menu: the added parts' slots by a readable name, not "upa_extra_1"
+      local addSlots = {}
+      for i, ex in ipairs(ctx.extras) do
+        local name = extraSlotPrefix .. i
+        addSlots[name] = {name = name, allowTypes = {extraSlotType}, denyTypes = {},
+          description = string.format('%s %d: %s', ex.engine2 and 'Second engine' or 'Added part', i, tostring(ex.part))}
+      end
+      if next(addSlots) then pcall(S.noteUi, ioCtx, partName, {addSlots = addSlots}) end
     elseif ctx.current then
       -- extra slots come last on the main part, so every part loaded from here on is a sub part of one
       local pex = ctx.extras[ctx.current]
-      if type(pex) == 'table' and not pex.meshOnly and type(pex.frontEnd) ~= 'table' then pcall(S.addPropAnchors, part, pex.model, ctx.current) end
+      if type(pex) == 'table' and not pex.meshOnly and type(pex.frontEnd) ~= 'table' then pcall(S.addPropAnchors, part, pex.model, ctx.current, ctx.names[ctx.current]) end
       S.scalePart(part, S.extraScale(ctx.extras[ctx.current]))
       S.tagExtraProps(part, S.extraScale(ctx.extras[ctx.current]))
       S.shiftPartTransforms(part)
@@ -2058,6 +2412,7 @@ local function wrappedGetPart(ioCtx, partName)
       -- settings a sub part adds to a renamed screen of its part (the digidash cells: "gauge")
       S.followRenamedSections(part, 'upa' .. ctx.current .. '_')
       if type(cex) == 'table' and cex.noLogic then S.stripPartLogic(part, ctx.current) end
+      if type(cex) == 'table' and cex.engine2 and not cex.meshOnly then S.prepareEngine2Part(part, ctx.current) end
       S.stripCouplerImports(part, ctx.current)
       S.noteExtraDevices(part, ctx.current)
     end
@@ -2091,6 +2446,7 @@ end
 
 local function wrappedFindParts(ioCtx, vehicleConfig)
   pendingUnifySwaps, pendingUnifyEngine, pendingUnifyLogic, S.pendingUnifyExtras = nil, nil, nil, nil
+  S.pendingUnifyGearbox = nil
   S.railHooks = {} -- per swap kind: nodes that rode a donor frame rail (S.detachSwapRails)
   S.extraDevices = {} -- powertrain device name -> index of the added part it came with (S.connectExtraDevices)
   S.renamedSections = {} -- per added part's prefix: settings sections its controllers were renamed from / to
@@ -2158,7 +2514,15 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
       end
     end
   end
-  if (#extras == 0 and not swap and not gbSwap and not partSwaps and not fiSwap) or type(ioCtx) ~= 'table' or type(ioCtx.preloadedDirs) ~= 'table' then
+  -- interior swaps (steering wheel, shifter, seats): car part name -> spec (S.buildInteriorPart)
+  local interior
+  for _, spec in ipairs(pa and type(pa.interiorSwaps) == 'table' and pa.interiorSwaps or {}) do
+    if type(spec) == 'table' and type(spec.carPart) == 'string' and spec.model and spec.part then
+      interior = interior or {}
+      interior[spec.carPart] = spec
+    end
+  end
+  if (#extras == 0 and not swap and not gbSwap and not partSwaps and not fiSwap and not interior) or type(ioCtx) ~= 'table' or type(ioCtx.preloadedDirs) ~= 'table' then
     return origFindParts(ioCtx, vehicleConfig)
   end
 
@@ -2171,6 +2535,7 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   if swap then donorModels[#donorModels + 1] = swap.model end
   if gbSwap then donorModels[#donorModels + 1] = gbSwap.model end
   for _, spec in pairs(partSwaps or {}) do donorModels[#donorModels + 1] = spec.model end
+  for _, spec in pairs(interior or {}) do donorModels[#donorModels + 1] = spec.model end
   for _, model in ipairs(donorModels) do
     local d = '/vehicles/' .. tostring(model) .. '/'
     if not have[d] and FS:directoryExists(d) then
@@ -2193,6 +2558,7 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   if swap then donorParts[#donorParts + 1] = swap.part end
   if gbSwap then donorParts[#donorParts + 1] = gbSwap.part end
   for _, spec in pairs(partSwaps or {}) do donorParts[#donorParts + 1] = spec.part end
+  for _, spec in pairs(interior or {}) do donorParts[#donorParts + 1] = spec.part end
   local more = false
   for _, d in ipairs(S.commonMeshDirs(ioCtx, donorParts)) do
     if not have[d] and FS:directoryExists(d) then
@@ -2208,13 +2574,15 @@ local function wrappedFindParts(ioCtx, vehicleConfig)
   local engineVersion = swap and (tonumber(swap.version) or 1) or 0
   local meshSwap = engineVersion >= 3 and swap or nil
   local partSwapEngine = engineVersion < 3 and swap or nil
-  injectCtx = {mainPart = vehicleConfig.mainPartName, extras = extras, names = {}, swap = partSwapEngine, meshSwap = meshSwap, gbSwap = gbSwap, partSwaps = partSwaps, fiSwap = fiSwap}
+  injectCtx = {mainPart = vehicleConfig.mainPartName, extras = extras, names = {}, swap = partSwapEngine, meshSwap = meshSwap, gbSwap = gbSwap, partSwaps = partSwaps, fiSwap = fiSwap, interior = interior}
   local ok, a, b, c, d, e, f, g = pcall(origFindParts, ioCtx, vehicleConfig)
   injectCtx = nil
   pendingUnifySwaps = partSwaps -- the loader unifies the parts right after this
   S.pendingUnifyExtras = #extras > 0 and extras or nil
   pendingUnifyEngine = engineVersion == 2 and swap or nil
   pendingUnifyLogic = engineVersion >= 4 and swap or nil
+  -- a resized gearbox swap: its tree grows / shrinks in the unify step (S.scaleGearboxTree)
+  S.pendingUnifyGearbox = gbSwap and S.extraScale(gbSwap) and gbSwap or nil
   if not ok then
     log('E', logTag, 'findParts failed: ' .. tostring(a))
     return nil
@@ -2689,11 +3057,35 @@ local function prepareTuneParts(journal, spec)
   end
   if not slotPath then return end
   local groups = partNodeGroups(enginePart)
-  local count = 0
+  local count, propCount = 0, 0
+  local carByName, carList = S.rawNodePositions(enginePart)
+  local donorPos = S.swapDonorPos[tostring(spec.part)] or {}
+  local daeDir = S.swapDaeDir[tostring(spec.part)] or ''
   for _, entry in ipairs(journal) do
     local child, partPath = entry[2], entry[5]
     if type(child) == 'table' and type(partPath) == 'string' and partPath:sub(1, #slotPath + #tuneSlotPrefix) == slotPath .. tuneSlotPrefix then
+      -- their props (a supercharger's pulley) stay, on the car's block nodes; placed by their model
+      -- file's pivot (S.placeExtraProps), moved like their meshes by the slot's move / turn
+      local props, propMeshes
+      if type(child.props) == 'table' and spec.meshSwap ~= false and S.swapPropsStatic(spec) then
+        -- a turned / resized engine: as plain meshes on the block (S.swapPropsStatic)
+        propMeshes = S.propMeshRows(child.props, groups)
+        propCount = propCount + #propMeshes
+      elseif type(child.props) == 'table' and spec.meshSwap ~= false then
+        local own = S.rawNodePositions(child)
+        local pos = {}
+        for k, v in pairs(donorPos) do pos[k] = v end
+        for k, v in pairs(own) do pos[k] = v end
+        local okR, rows, n = pcall(S.remapSwapProps, child.props, carByName, carList, pos, spec.move or {0, 0, 0})
+        if okR and rows and n > 0 then
+          table.insert(rows, 2, {upaPropFix = true, upaScale = '', upaDaeDir = daeDir})
+          rows[#rows + 1] = {upaPropFix = '', upaScale = '', upaDaeDir = ''}
+          props = rows
+          propCount = propCount + n
+        end
+      end
       for sectionName, _ in pairs(tunePhysicsSections) do child[sectionName] = nil end
+      child.props = props
       -- their nodes are gone, so any node reference in their data (e.g. "oilpanNodes:") would stay a
       -- dangling name and crash the engine code: drop those, the car's own engine keeps its own
       for sectionName, section in pairs(child) do
@@ -2703,11 +3095,21 @@ local function prepareTuneParts(journal, spec)
           end
         end
       end
+      if propMeshes and #propMeshes > 0 and #groups > 0 then
+        if type(child.flexbodies) ~= 'table' or type(child.flexbodies[1]) ~= 'table' then
+          child.flexbodies = {{'mesh', '[group]:', 'nonFlexMaterials'}}
+        end
+        for _, row in ipairs(propMeshes) do child.flexbodies[#child.flexbodies + 1] = row end
+      end
       if type(child.flexbodies) == 'table' then
         if #groups > 0 then
           for i, row in ipairs(child.flexbodies) do
             if i > 1 and type(row) == 'table' and type(row[1]) == 'string' then row[2] = deepcopy(groups) end
           end
+          -- a resized engine: its tuning parts' models grow with it (around the same pivot, before
+          -- the slot's move / turn)
+          local sc = S.extraScale(spec)
+          if sc then S.scalePart({flexbodies = child.flexbodies}, sc) end
         else
           child.flexbodies = nil
         end
@@ -2715,7 +3117,34 @@ local function prepareTuneParts(journal, spec)
       count = count + 1
     end
   end
-  log('I', logTag, string.format('engine logic swap: %d donor tuning parts loaded as data', count))
+  log('I', logTag, string.format('engine logic swap: %d donor tuning parts loaded as data (%d props on the block)', count, propCount))
+end
+
+-- a resized gearbox swap: the swapped-in gearbox and every part below it (transfer case...) grow /
+-- shrink around the preview's pivot (nodes and models), before their move / turn - as its preview
+-- showed. Returns a log line.
+S.scaleGearboxTree = function(journal, spec)
+  local sc = S.extraScale(spec)
+  if not sc then return 'real size' end
+  local slotPath
+  for _, entry in ipairs(journal) do
+    local child, partPath = entry[2], entry[5]
+    if type(child) == 'table' and child.partName == gearboxAlias and type(partPath) == 'string'
+      and partPath:sub(-#gearboxAlias) == gearboxAlias then
+      slotPath = partPath:sub(1, #partPath - #gearboxAlias)
+      break
+    end
+  end
+  if not slotPath then return 'swapped gearbox not found in the tree' end
+  local n = 0
+  for _, entry in ipairs(journal) do
+    local child, partPath = entry[2], entry[5]
+    if type(child) == 'table' and type(partPath) == 'string' and partPath:sub(1, #slotPath) == slotPath then
+      S.scalePart(child, sc)
+      n = n + 1
+    end
+  end
+  return string.format('%s: %d parts', S.scaleLabel(spec.scale), n)
 end
 
 -- an added part comes alone: rows of its tree that hang on the donor car's body (a pickup bullbar's
@@ -2786,6 +3215,128 @@ S.stripPartLogic = function(part, idx)
   end
 end
 
+-- a second engine (an added engine with ex.engine2): the game's powertrain is a tree - two engines
+-- can't turn one shaft - so it is no device of its own. Its parts (block, ECU, intake, internals...)
+-- come with their physics and models, and their engine data goes into a section of its own,
+-- "upa<idx>_engine2", instead of the car's "mainEngine"; in Phase2 S.applyEngine2 adds the torque
+-- it makes to the car's engine (both on one crankshaft, at the same rpm). Its devices (its own
+-- gearbox...), their data, its sounds, turbo / supercharger, controllers and tuning variables stay
+-- out: they would merge into the car's of the same name.
+S.engine2Drop = {'soundConfig', 'soundConfigExhaust', 'turbocharger', 'supercharger', 'nitrousOxideInjection',
+  'vehicleController', 'variables', 'gearbox', 'clutch', 'torqueConverter', 'torsionReactor', 'transfercase',
+  'transferCase', 'rangebox', 'driveshaft', 'differential_F', 'differential_R'}
+S.engine2Key = function(idx) return 'upa' .. tostring(idx) .. '_engine2' end
+S.prepareEngine2Part = function(part, idx)
+  local dropped = {}
+  for r, row in ipairs(type(part.powertrain) == 'table' and part.powertrain or {}) do
+    local name = r > 1 and type(row) == 'table' and row[2]
+    if type(name) == 'string' and name ~= 'mainEngine' and part[name] ~= nil then
+      part[name] = nil
+      dropped[#dropped + 1] = name
+    end
+  end
+  if type(part.mainEngine) == 'table' then
+    part[S.engine2Key(idx)] = part.mainEngine
+    part.mainEngine = nil
+  end
+  for _, key in ipairs(S.engine2Drop) do
+    if part[key] ~= nil then
+      part[key] = nil
+      dropped[#dropped + 1] = key
+    end
+  end
+  S.stripPartLogic(part, idx)
+  if #dropped > 0 then
+    log('I', logTag, string.format('second engine %d, %s: left out %s', idx, tostring(part.partName), table.concat(dropped, ', ')))
+  end
+end
+
+-- a torque table (["rpm", "torque"] header, rows {rpm, torque}) at this rpm, straight lines between
+-- its points; beyond its last point: its last value (the game's intake / exhaust tables) or 0 (a
+-- base curve)
+S.curveAt = function(t, rpm, holdLast)
+  if type(t) ~= 'table' or type(t[1]) ~= 'table' then return 0 end
+  local rc, tc = 1, 2
+  for i, h in ipairs(t[1]) do
+    if h == 'rpm' then rc = i elseif h == 'torque' then tc = i end
+  end
+  local pts = {}
+  for i = 2, #t do
+    local row = t[i]
+    if type(row) == 'table' and type(row[rc]) == 'number' and type(row[tc]) == 'number' then pts[#pts + 1] = {row[rc], row[tc]} end
+  end
+  if #pts == 0 then return 0 end
+  table.sort(pts, function(a, b) return a[1] < b[1] end)
+  if rpm <= pts[1][1] then return pts[1][2] end
+  for i = 2, #pts do
+    if rpm <= pts[i][1] then
+      local a, b = pts[i - 1], pts[i]
+      local f = (b[1] - a[1]) > 0 and (rpm - a[1]) / (b[1] - a[1]) or 1
+      return a[2] + (b[2] - a[2]) * f
+    end
+  end
+  return holdLast and pts[#pts][2] or 0
+end
+
+-- the highest rpm of a torque table
+S.curveMaxRpm = function(t)
+  local m = 0
+  for i = 2, type(t) == 'table' and #t or 0 do
+    if type(t[i]) == 'table' and type(t[i][1]) == 'number' then m = math.max(m, t[i][1]) end
+  end
+  return m
+end
+
+-- in the loaded car: every second engine's torque (its base curve x its multiplier curve + its intake
+-- and exhaust additions, as the game sums an engine's curves, x its "power by size") is added to the
+-- car's engine as one more exhaust torque table; its friction, engine braking and inertia join the
+-- car's (two crankshafts on one). A turbo / supercharger of the car's engine boosts both. Returns a log line.
+S.applyEngine2 = function(vehicle, extras)
+  local list = {}
+  for i, ex in ipairs(type(extras) == 'table' and extras or {}) do
+    if type(ex) == 'table' and ex.engine2 and not ex.meshOnly and type(vehicle[S.engine2Key(i)]) == 'table' then
+      list[#list + 1] = {i = i, ex = ex, data = vehicle[S.engine2Key(i)]}
+    end
+  end
+  if #list == 0 then return nil end
+  local name
+  for _, d in pairs(type(vehicle.powertrain) == 'table' and vehicle.powertrain or {}) do
+    if type(d) == 'table' and d.type == 'combustionEngine' and type(d.name) == 'string' and (not name or d.name == 'mainEngine') then name = d.name end
+  end
+  local main = name and vehicle[name]
+  if type(main) ~= 'table' or type(main.torque) ~= 'table' then return 'the car has no combustion engine to join - the second engine is only its model and weight' end
+  -- the rpm range: the car's engine and every second engine
+  local top = math.max(S.curveMaxRpm(main.torque), S.curveMaxRpm(main.torqueModIntake), S.curveMaxRpm(main.torqueModExhaust), tonumber(main.maxRPM) or 0)
+  for _, e in ipairs(list) do
+    e.top = math.max(S.curveMaxRpm(e.data.torque), S.curveMaxRpm(e.data.torqueModIntake), S.curveMaxRpm(e.data.torqueModExhaust))
+    top = math.max(top, e.top)
+  end
+  local out = {{'rpm', 'torque'}}
+  local peak, peakRpm = 0, 0
+  for rpm = 0, top + 500, 250 do
+    local add = 0
+    for _, e in ipairs(list) do
+      local d = e.data
+      -- past its own last point it makes nothing (the car's engine may rev higher)
+      local v = 0
+      if rpm <= e.top then
+        local mult = type(d.torqueModMult) == 'table' and S.curveAt(d.torqueModMult, rpm, true) or 1
+        v = S.curveAt(d.torque, rpm, false) * mult + S.curveAt(d.torqueModIntake, rpm, true) + S.curveAt(d.torqueModExhaust, rpm, true)
+      end
+      add = add + v * S.enginePowerFactor({scale = e.ex.scale, scalePower = e.ex.scalePower})
+    end
+    if add > peak then peak, peakRpm = add, rpm end
+    out[#out + 1] = {rpm, S.curveAt(main.torqueModExhaust, rpm, true) + add}
+  end
+  main.torqueModExhaust = out
+  for _, e in ipairs(list) do
+    for _, key in ipairs({'friction', 'dynamicFriction', 'engineBrakeTorque', 'inertia'}) do
+      if type(e.data[key]) == 'number' and type(main[key]) == 'number' then main[key] = main[key] + e.data[key] end
+    end
+  end
+  return string.format('%d second engine(s) on %s: +%d Nm at %d rpm (added to its torque)', #list, name, math.floor(peak + 0.5), peakRpm)
+end
+
 -- a coupler point's "importInputs" / "importElectrics" (node options): the vehicle the point belongs
 -- to takes those inputs (throttle, brake, parking brake) and electrics (lights, signals) from the
 -- vehicle coupled to it - right for the truck it was made for (B-Series' front tow hitch), but on
@@ -2832,8 +3383,20 @@ S.tagExtraProps = function(part, sc)
   pr[#pr + 1] = {upaPropFix = '', upaScale = ''}
 end
 
+-- a model file node's turn: its matrix without its size, as the rows of a 3x3
+S.daeRot = function(m)
+  local r = {{}, {}, {}}
+  for j = 1, 3 do
+    local a, b, c = m[j], m[4 + j], m[8 + j]
+    local l = math.sqrt(a * a + b * b + c * c)
+    if l < 1e-9 then return nil end
+    r[1][j], r[2][j], r[3][j] = a / l, b / l, c / l
+  end
+  return r
+end
+
 -- the places (translations) of the named nodes in the model files of these folders: {x, y, z} in
--- the car's space. Each file is read once (its nodes kept); the folders' own files first.
+-- the car's space, with rot (S.daeRot). Each file is read once (its nodes kept); the folders' own files first.
 S.daeNodeCache, S.daeFileLists = {}, {}
 S.daeNodePos = function(mesh, dirs)
   local read = 0
@@ -2864,7 +3427,7 @@ S.daeNodePos = function(mesh, dirs)
               for name, mat in text:gmatch('<node id="[^"]*" name="([^"]+)"[^>]*>%s*<matrix[^>]*>([^<]*)</matrix>') do
                 local m = {}
                 for v in mat:gmatch('%S+') do m[#m + 1] = tonumber(v) or 0 end
-                if #m >= 12 and not idx[name] then idx[name] = {x = m[4] * unit, y = m[8] * unit, z = m[12] * unit} end
+                if #m >= 12 and not idx[name] then idx[name] = {x = m[4] * unit, y = m[8] * unit, z = m[12] * unit, rot = S.daeRot(m)} end
               end
             end
           end
@@ -2884,7 +3447,13 @@ S.placeExtraProps = function(vehicle)
   for _, prop in pairs(type(vehicle.props) == 'table' and vehicle.props or {}) do
     if type(prop) == 'table' and prop.upaPropFix == true and prop.baseTranslationGlobal == nil
       and type(prop.mesh) == 'string' and prop.mesh ~= 'SPOTLIGHT' and prop.mesh ~= 'POINTLIGHT' then
-      local p = S.daeNodePos(prop.mesh, vehicle.directoriesLoaded)
+      -- a swapped engine's props name their model's folder: looked for there first
+      local dirs = vehicle.directoriesLoaded
+      if type(prop.upaDaeDir) == 'string' and prop.upaDaeDir ~= '' then
+        dirs = {prop.upaDaeDir}
+        for _, d in ipairs(type(vehicle.directoriesLoaded) == 'table' and vehicle.directoriesLoaded or {}) do dirs[#dirs + 1] = d end
+      end
+      local p = S.daeNodePos(prop.mesh, dirs)
       if p then
         local sc = type(prop.upaScale) == 'table' and prop.upaScale or nil
         local f, c = {1, 1, 1}, {0, 0, 0}
@@ -2908,12 +3477,259 @@ S.placeExtraProps = function(vehicle)
   end
 end
 
+--------------------------------------------------------------------------------
+-- a prop's turn. The game shows a prop's model turned by its frame times its baseRotation: the
+-- frame from its three nodes - x toward idX, z toward idY (square to x), y = z cross x - and the
+-- baseRotation as the matrix Ry(-y) Rz(z) Rx(x) (degrees). Checked on the 35 stock cars that
+-- carry the common steering wheels (steer_01a...: each shows that same model the same way up,
+-- facing its driver, only this way) and on the etk800's, the us_semi cabover's and longnose's own
+-- wheels (frame times baseRotation is their model file's own turn). Its "rotation" (a steering
+-- wheel's spin) turns about that turned model's own axes. 3x3 as rows.
+--------------------------------------------------------------------------------
+S.v3dot = function(a, b) return a[1] * b[1] + a[2] * b[2] + a[3] * b[3] end
+S.v3cross = function(a, b) return {a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1]} end
+S.v3norm = function(a)
+  local l = math.sqrt(S.v3dot(a, a))
+  if l < 1e-9 then return nil end
+  return {a[1] / l, a[2] / l, a[3] / l}
+end
+S.m3mul = function(a, b)
+  local r = {}
+  for i = 1, 3 do
+    r[i] = {}
+    for j = 1, 3 do r[i][j] = a[i][1] * b[1][j] + a[i][2] * b[2][j] + a[i][3] * b[3][j] end
+  end
+  return r
+end
+S.m3T = function(a) return {{a[1][1], a[2][1], a[3][1]}, {a[1][2], a[2][2], a[3][2]}, {a[1][3], a[2][3], a[3][3]}} end
+S.m3apply = function(a, v) return {S.v3dot(a[1], v), S.v3dot(a[2], v), S.v3dot(a[3], v)} end
+-- a turn about axis 1 (x), 2 (y) or 3 (z), degrees, right-handed
+S.m3axis = function(axis, deg)
+  local t = math.rad(deg)
+  local c, s = math.cos(t), math.sin(t)
+  if axis == 1 then return {{1, 0, 0}, {0, c, -s}, {0, s, c}} end
+  if axis == 2 then return {{c, 0, s}, {0, 1, 0}, {-s, 0, c}} end
+  return {{c, -s, 0}, {s, c, 0}, {0, 0, 1}}
+end
+-- the smallest turn taking the unit vector a onto the unit vector b
+S.m3between = function(a, b)
+  local ax = S.v3cross(a, b)
+  local s, c = math.sqrt(S.v3dot(ax, ax)), S.v3dot(a, b)
+  if s < 1e-9 then return S.m3axis(1, 0) end
+  local x, y, z = ax[1] / s, ax[2] / s, ax[3] / s
+  local t = 1 - c
+  return {{t * x * x + c, t * x * y - s * z, t * x * z + s * y},
+          {t * x * y + s * z, t * y * y + c, t * y * z - s * x},
+          {t * x * z - s * y, t * y * z + s * x, t * z * z + c}}
+end
+-- a prop's frame from its three nodes' places (vec3s)
+S.propFrameMat = function(pr, px, py)
+  local x = S.v3norm({px.x - pr.x, px.y - pr.y, px.z - pr.z})
+  if not x then return nil end
+  local Y = {py.x - pr.x, py.y - pr.y, py.z - pr.z}
+  local d = S.v3dot(Y, x)
+  local z = S.v3norm({Y[1] - x[1] * d, Y[2] - x[2] * d, Y[3] - x[3] * d})
+  if not z then return nil end
+  local y = S.v3cross(z, x)
+  return {{x[1], y[1], z[1]}, {x[2], y[2], z[2]}, {x[3], y[3], z[3]}}
+end
+-- a baseRotation {x, y, z} (degrees) as a turn, and back
+S.propBaseMat = function(r)
+  local bx = tonumber(type(r) == 'table' and r.x) or 0
+  local by = tonumber(type(r) == 'table' and r.y) or 0
+  local bz = tonumber(type(r) == 'table' and r.z) or 0
+  return S.m3mul(S.m3mul(S.m3axis(2, -by), S.m3axis(3, bz)), S.m3axis(1, bx))
+end
+-- (read off its transpose, Rx(-x) Rz(-z) Ry(y))
+S.propBaseEuler = function(Bm)
+  local B = S.m3T(Bm)
+  local sC = math.max(-1, math.min(1, -B[1][2]))
+  local C = math.asin(sC)
+  local A, b
+  if math.abs(math.cos(C)) < 1e-6 then
+    A, b = 0, math.atan2(-B[3][1], B[3][3])
+  else
+    A, b = math.atan2(B[3][2], B[2][2]), math.atan2(B[1][3], B[1][1])
+  end
+  return -math.deg(A), math.deg(b), -math.deg(C)
+end
+-- the turn jbeam "nodeRotate" {x, y, z} gives node places (MatrixF euler of -x, -y, -z): the props
+-- of a turned part turn with its models
+S.nodeRotateMat = function(r)
+  local x, y, z = tonumber(r[1]) or 0, tonumber(r[2]) or 0, tonumber(r[3]) or 0
+  if math.abs(x) + math.abs(y) + math.abs(z) < 1e-6 then return nil end
+  local m = MatrixF(true)
+  m:setFromEuler(vec3(math.rad(-x), math.rad(-y), math.rad(-z)))
+  local c = {}
+  for j, e in ipairs({vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)}) do c[j] = vec3(m:mulP3F(e)) end
+  return {{c[1].x, c[2].x, c[3].x}, {c[1].y, c[2].y, c[3].y}, {c[1].z, c[2].z, c[3].z}}
+end
+
+-- the columns of a props list: its nodes (ref, x, y), func, mesh, baseRotation (base), rotation (rot)
+S.propCols = function(pr)
+  local c = {}
+  for i, h in ipairs(type(pr) == 'table' and type(pr[1]) == 'table' and pr[1] or {}) do
+    if h == 'idRef:' then c.ref = i elseif h == 'idX:' then c.x = i elseif h == 'idY:' then c.y = i elseif h == 'func' then c.func = i
+    elseif h == 'mesh' then c.mesh = i elseif h == 'baseRotation' then c.base = i elseif h == 'rotation' then c.rot = i end
+  end
+  return c
+end
+
+-- each prop row of a props list (fn(index, row, options)): its options are the option rows above
+-- it (a "" clears one) with its own on top
+S.eachPropRow = function(pr, fn)
+  local width = #pr[1]
+  local mods = {}
+  for i = 2, #pr do
+    local row = pr[i]
+    if type(row) == 'table' and type(row[1]) == 'string' then
+      local eff = {}
+      for k, v in pairs(mods) do eff[k] = v end
+      local own = #row > width and type(row[#row]) == 'table' and row[#row] or {}
+      for k, v in pairs(own) do if v == '' then eff[k] = nil else eff[k] = v end end
+      fn(i, row, eff)
+    elseif type(row) == 'table' then
+      for k, v in pairs(row) do if v == '' then mods[k] = nil else mods[k] = v end end
+    end
+  end
+end
+
+-- the places (name -> vec3) of the nodes a part's props hang on: the part's own, else where its
+-- car's default parts have them (kept per car and names)
+S.intNodeCache = {}
+S.propNodesOf = function(part, model, pr, c)
+  local nodes = S.rawNodePositions(part)
+  local want, keys = {}, {}
+  for i = 2, #pr do
+    local row = pr[i]
+    if type(row) == 'table' and type(row[1]) == 'string' then
+      for _, k in ipairs({c.ref or 0, c.x or 0, c.y or 0}) do
+        local n = row[k]
+        if type(n) == 'string' and not nodes[n] and not want[n] then
+          want[n] = true
+          keys[#keys + 1] = n
+        end
+      end
+    end
+  end
+  if #keys > 0 then
+    table.sort(keys)
+    local key = tostring(model) .. '|' .. table.concat(keys, ',')
+    local found = S.intNodeCache[key]
+    if not found then
+      local ok, r = pcall(S.donorNodePositions, model, want)
+      found = ok and type(r) == 'table' and r or {}
+      S.intNodeCache[key] = found
+    end
+    for n, p in pairs(found) do nodes[n] = p end
+  end
+  return nodes
+end
+
+-- where a prop's model sits on its own car and how it is turned there. The game puts one with a
+-- "baseTranslation" at its idRef point plus that offset in metres along its frame: x toward idX,
+-- y toward idY, z = y cross x (checked: the etk800's common wheels' 0.6 from f5l lands on its own
+-- wheel's place, the bluebuck's within 8 cm of its own, the race truck's in front of its driver's
+-- seat); one with a "baseTranslationGlobal" at that point; else where its model file has it. Its
+-- look is its frame times its baseRotation (nil without its nodes). opts: S.eachPropRow's.
+S.propPlaceLook = function(row, c, opts, nodes, dirs)
+  local pr, px, py = nodes[row[c.ref or 0]], nodes[row[c.x or 0]], nodes[row[c.y or 0]]
+  local F = pr and px and py and S.propFrameMat(pr, px, py) or nil
+  local base = type(opts.baseRotation) == 'table' and opts.baseRotation or row[c.base or 0]
+  local look = F and S.m3mul(F, S.propBaseMat(base)) or nil
+  local g, t = opts.baseTranslationGlobal, opts.baseTranslation
+  if type(g) == 'table' then
+    return vec3(tonumber(g.x) or 0, tonumber(g.y) or 0, tonumber(g.z) or 0), look
+  elseif type(t) == 'table' then
+    if not F then return nil, look end
+    local tx, ty, tz = tonumber(t.x) or 0, tonumber(t.y) or 0, tonumber(t.z) or 0
+    -- the frame's columns: x, y (= z cross x: the offset's z), z (toward idY: the offset's y)
+    return vec3(pr.x + F[1][1] * tx + F[1][3] * ty + F[1][2] * tz,
+                pr.y + F[2][1] * tx + F[2][3] * ty + F[2][2] * tz,
+                pr.z + F[3][1] * tx + F[3][3] * ty + F[3][2] * tz), look
+  end
+  local m = row[c.mesh or 0]
+  local p = type(m) == 'string' and S.daeNodePos(m, dirs)
+  return p and vec3(p.x, p.y, p.z) or nil, look
+end
+
+-- in the loaded car: the interior swap's props (S.buildInteriorPart) hang on the car's frames, not
+-- the donor's - with the donor's baseRotation they stood turned (the us_semi's wheel on the etk800:
+-- 90 degrees). Each gets the baseRotation that shows it as in its model file on the car's frame; a
+-- steering wheel then has its turning axis put on the car's own wheel's (the car's column), and the
+-- player's turn (upaIntRot) goes on top.
+S.orientInteriorProps = function(vehicle)
+  local turned, lined, noModel = 0, 0, 0
+  local nodes = type(vehicle.nodes) == 'table' and vehicle.nodes or {}
+  local byName
+  local function nodeOf(id)
+    local cid = tonumber(id)
+    if cid then return nodes[cid] end
+    if type(id) ~= 'string' then return nil end
+    if not byName then
+      byName = {}
+      for _, n in pairs(nodes) do
+        if type(n) == 'table' and type(n.name) == 'string' then byName[n.name] = n end
+      end
+    end
+    return byName[id]
+  end
+  for _, prop in pairs(type(vehicle.props) == 'table' and vehicle.props or {}) do
+    if type(prop) == 'table' and prop.upaIntSwap == true and type(prop.mesh) == 'string' and prop.mesh ~= 'SPOTLIGHT'
+      and prop.mesh ~= 'POINTLIGHT' and prop.baseRotationGlobal == nil then
+      local nr, nx, ny = nodeOf(prop.idRef), nodeOf(prop.idX), nodeOf(prop.idY)
+      local F = nr and nx and ny and nr.pos and nx.pos and ny.pos and S.propFrameMat(nr.pos, nx.pos, ny.pos)
+      if F then
+        local dirs = vehicle.directoriesLoaded
+        if type(prop.upaDaeDir) == 'string' and prop.upaDaeDir ~= '' then
+          dirs = {prop.upaDaeDir}
+          for _, d in ipairs(type(vehicle.directoriesLoaded) == 'table' and vehicle.directoriesLoaded or {}) do dirs[#dirs + 1] = d end
+        end
+        local p = S.daeNodePos(prop.mesh, dirs)
+        local M = p and p.rot
+        -- a model turned in its file shows that way; one standing straight there (the common
+        -- wheels, turned only by their baseRotation) as it was on its own car's frame
+        local lk = prop.upaIntLook
+        if type(lk) == 'table' and #lk == 9 and (not M or M[1][1] + M[2][2] + M[3][3] > 3 - 1e-4) then
+          M = {{lk[1], lk[2], lk[3]}, {lk[4], lk[5], lk[6]}, {lk[7], lk[8], lk[9]}}
+        elseif not M then
+          M = S.m3mul(F, S.propBaseMat(prop.baseRotation))
+          noModel = noModel + 1
+        end
+        local sp, cs = prop.rotation, prop.upaIntSpin
+        if type(sp) == 'table' and type(cs) == 'table' and type(prop.upaIntBase) == 'table' then
+          local sd = S.v3norm({tonumber(sp.x) or 0, tonumber(sp.y) or 0, tonumber(sp.z) or 0})
+          local sc = S.v3norm({tonumber(cs.x) or 0, tonumber(cs.y) or 0, tonumber(cs.z) or 0})
+          if sd and sc then
+            local cd = S.m3apply(M, sd)
+            local cc = S.m3apply(S.m3mul(F, S.propBaseMat(prop.upaIntBase)), sc)
+            if S.v3dot(cd, cc) < 0 then cd = {-cd[1], -cd[2], -cd[3]} end
+            M = S.m3mul(S.m3between(cd, cc), M)
+            lined = lined + 1
+          end
+        end
+        local R = type(prop.upaIntRot) == 'table' and S.nodeRotateMat(prop.upaIntRot)
+        if R then M = S.m3mul(R, M) end
+        local bx, by, bz = S.propBaseEuler(S.m3mul(S.m3T(F), M))
+        prop.baseRotation = {x = bx, y = by, z = bz}
+        turned = turned + 1
+      end
+    end
+  end
+  if turned > 0 then
+    log('I', logTag, string.format('interior swap props: %d turned onto the car\'s frames (%d steering wheel models lined up with the car\'s column%s)',
+      turned, lined, noModel > 0 and string.format(', %d without their model file turn', noModel) or ''))
+  end
+end
+
 -- props (gauge needles, a steering wheel...) of an added part hang on three nodes each (idRef,
 -- idX, idY: their place and their turn). A gauge part's are often its car's dashboard or body
 -- nodes, not its own: left behind with the donor's body, the game threw those props away - gauges
 -- without needles. Those nodes come along as light points of the part, where they are on the
 -- donor car, each tied to the part's 3 nearest nodes. Called before the part is sized and renamed.
-S.addPropAnchors = function(part, model, idx)
+S.addPropAnchors = function(part, model, idx, known)
+  -- known: names the added part already has (its parent parts - a supercharger under its engine: the
+  -- engine has e3l, bringing another e3l would put the engine's beams on a 0.3 kg point)
   local pr = part.props
   if type(pr) ~= 'table' or type(pr[1]) ~= 'table' or type(part.nodes) ~= 'table' then return 0 end
   local cols = {}
@@ -2958,7 +3774,7 @@ S.addPropAnchors = function(part, model, idx)
     if type(row) == 'table' and row[1] ~= nil then
       for _, c in ipairs(cols) do
         local n = row[c]
-        if type(n) == 'string' and n ~= '' and not own[n] and not missing[n] then
+        if type(n) == 'string' and n ~= '' and not own[n] and not missing[n] and not (type(known) == 'table' and known[n]) then
           missing[n] = true
           left = left + 1
         end
@@ -2985,22 +3801,55 @@ S.addPropAnchors = function(part, model, idx)
   end
   local main = jbeamIO.getMainPartName(ioCtx)
   if main then find(main, 0) end
+  -- the brought points only carry the props: the part's own beams / triangles to them (a
+  -- supercharger's 4.7 MN/m beams to its engine's e3l / e3r / e4l, made for heavy block nodes) on a
+  -- 0.3 kg point blew the car up at once. They are left out, as all its rows to the donor car are
+  -- (S.isolateExtras) - the part hangs on its virtual mount
+  local cut = 0
+  if next(pos) then
+    for _, key in ipairs({'beams', 'triangles', 'quads', 'hydros', 'torsionbars'}) do
+      local sec = part[key]
+      if type(sec) == 'table' then
+        local keep = {}
+        for i, row in ipairs(sec) do
+          local uses = false
+          if i > 1 and type(row) == 'table' then
+            for c = 1, 4 do
+              if type(row[c]) == 'string' and pos[row[c]] then uses = true break end
+            end
+          end
+          if uses then cut = cut + 1 else keep[#keep + 1] = row end
+        end
+        part[key] = keep
+      end
+    end
+  end
   if type(part.beams) ~= 'table' then part.beams = {{'id1:', 'id2:'}} end
   -- inline options: the modifier rows above them in the lists would apply to them too
-  local nodeOpts = {nodeWeight = 0.3, collision = false, selfCollision = false, group = ''}
+  -- (upaPropAnchor: the virtual mount's cage leaves them out - S.mountExtra; they ride on their 3 beams)
+  local nodeOpts = {nodeWeight = 0.3, collision = false, selfCollision = false, group = '', upaPropAnchor = true}
   local beamOpts = {beamType = '|NORMAL', beamSpring = 200000, beamDamp = 20, beamDeform = math.huge, beamStrength = math.huge,
     beamPrecompression = 1, breakGroup = '', deformGroup = ''}
   local added = {}
   for n, p in pairs(pos) do
     part.nodes[#part.nodes + 1] = {n, p.x, p.y, p.z, deepcopy(nodeOpts)}
     table.sort(partNodes, function(a, b) return a.p:squaredDistance(p) < b.p:squaredDistance(p) end)
-    for k = 1, 3 do part.beams[#part.beams + 1] = {n, partNodes[k].n, deepcopy(beamOpts)} end
+    -- its 3 nearest part points, none sitting on it (a beam of no length has no direction)
+    local tied = 0
+    for _, pn in ipairs(partNodes) do
+      if tied >= 3 then break end
+      if pn.p:squaredDistance(p) > 0.02 * 0.02 then
+        part.beams[#part.beams + 1] = {n, pn.n, deepcopy(beamOpts)}
+        tied = tied + 1
+      end
+    end
     added[#added + 1] = n
   end
   if #added > 0 then
     table.sort(added)
-    log('I', logTag, string.format('extra part %d, %s: %d prop nodes of its car brought along (gauge needles...): %s%s', idx, tostring(part.partName),
-      #added, table.concat(added, ' '), left > 0 and string.format('; %d not found on the donor car', left) or ''))
+    log('I', logTag, string.format('extra part %d, %s: %d prop nodes of its car brought along (gauge needles...): %s%s%s', idx, tostring(part.partName),
+      #added, table.concat(added, ' '), left > 0 and string.format('; %d not found on the donor car', left) or '',
+      cut > 0 and string.format('; %d of its beams / triangles to them left out (they only carry the props)', cut) or ''))
   end
   return #added
 end
@@ -3102,6 +3951,37 @@ S.connectExtraExhausts = function(vehicle, extras)
     end
   end
   return total
+end
+
+--------------------------------------------------------------------------------
+-- exhaust outlets on / off (section 4): each exhaust starts at a start node ("isExhaust" - an
+-- engine's exhaust port, an added exhaust's inlet, S.connectExtraExhausts) and the game lets the
+-- smoke, flames and exhaust sound out at the ends of the pipes it reaches. A start switched off
+-- leads nowhere: its pipes go quiet (the car's own exhaust left on the engine after new mufflers
+-- went on smoked from under the engine). Kept by the start node's name
+-- (cfg.partAttacher.exhaustOff = {{n = name, p = its part}}); its pipes keep their marks, so
+-- the list still shows its outlets.
+--------------------------------------------------------------------------------
+S.isExhaustFlag = function(v) return v ~= nil and v ~= false and v ~= '' end
+
+S.applyExhaustOff = function(vehicle, list)
+  local off = {}
+  for _, e in ipairs(list) do
+    local name = type(e) == 'table' and e.n or e
+    if type(name) == 'string' then off[name] = true end
+  end
+  local done, left = 0, 0
+  for _, n in pairs(type(vehicle.nodes) == 'table' and vehicle.nodes or {}) do
+    if type(n) == 'table' and S.isExhaustFlag(n.isExhaust) then
+      if off[n.name] then
+        n.isExhaust = nil
+        done = done + 1
+      else
+        left = left + 1
+      end
+    end
+  end
+  return string.format('%d switched off, %d left on%s', done, left, left == 0 and ' (no smoke; the exhaust sound comes from the engine)' or '')
 end
 
 -- devices of added parts that hang on an engine (a truck's air compressor on its engine's 3rd
@@ -3214,6 +4094,12 @@ local function wrappedUnifyPartJournal(ioCtx, journal)
     local ok, err = pcall(prepareTuneParts, journal, logicSwap)
     if not ok then log('E', logTag, 'preparing donor tuning parts failed: ' .. tostring(err)) end
   end
+  local gbScaled = S.pendingUnifyGearbox
+  S.pendingUnifyGearbox = nil
+  if gbScaled and type(journal) == 'table' then
+    local ok, res = pcall(S.scaleGearboxTree, journal, gbScaled)
+    log(ok and 'I' or 'E', logTag, 'gearbox swap size: ' .. tostring(res))
+  end
   S.subframeEngineOut = nil
   if swaps and type(journal) == 'table' then
     local ok, err = pcall(renameSwappedTrees, journal, swaps)
@@ -3246,6 +4132,11 @@ local function installLoaderHooks()
   jbeamSlotSystem.findParts = S.findPartsHook
   jbeamIO.getPart = wrappedGetPart
   jbeamSlotSystem.unifyPartJournal = wrappedUnifyPartJournal
+  -- the parts menu's names of a swapped engine (S.wrappedAvailableParts)
+  if not S.origAvailableParts then
+    S.origAvailableParts = jbeamIO.getAvailableParts
+    jbeamIO.getAvailableParts = S.wrappedAvailableParts
+  end
 end
 
 local function removeLoaderHooks()
@@ -3254,6 +4145,10 @@ local function removeLoaderHooks()
   jbeamIO.getPart = origGetPart
   jbeamSlotSystem.unifyPartJournal = origUnifyPartJournal
   origFindParts, origGetPart, origUnifyPartJournal = nil, nil, nil
+  if S.origAvailableParts then
+    jbeamIO.getAvailableParts = S.origAvailableParts
+    S.origAvailableParts = nil
+  end
 end
 
 -- nodes nothing may be welded to: the driver / passenger dummies, seats, interior, cargo. On some
@@ -3349,7 +4244,8 @@ local function weldEachToNearest(vehicle, isPart, isBody, spec, k, maxDist, isPr
     local factor = {}
     for cid, sum in pairs(added) do
       local n = vehicle.nodes[cid]
-      local mass = math.max(0.5, tonumber(n and n.nodeWeight) or defaultMass)
+      -- the node's real mass (a 0.5 kg floor sized the welds of a 0.3 kg point for 0.5 kg: too stiff)
+      local mass = math.max(0.05, tonumber(n and n.nodeWeight) or defaultMass)
       local budget = math.max(mass * omega2 - existing[cid], 0.3 * mass * omega2)
       local dampBudget = 0.3 * mass / 0.0005
       factor[cid] = {
@@ -3533,6 +4429,8 @@ local function stabilizeNodes(vehicle, nodeSet, label)
         n.nodeWeight = newMass
         added = added + newMass - m
         fixed = fixed + 1
+        -- (the weight section shows how much of the car's weight this added)
+        vehicle.upaStabMass = (tonumber(vehicle.upaStabMass) or 0) + newMass - m
       end
     end
   end
@@ -3562,6 +4460,102 @@ local function stabilizeNodes(vehicle, nodeSet, label)
   end
   log('I', logTag, string.format('%s: %d nodes, %.0f kg; riskiest now: %s', label, #risk, total, table.concat(top, '; ')))
   return fixed
+end
+
+--------------------------------------------------------------------------------
+-- a lighter car (section 3, "Norimas svoris"): every point's mass (not the wheels', the tyres act by
+-- them) goes down by one factor, but never below what the 2 kHz physics step needs for the beams on
+-- it, and never up. So the lightest it can get is limited; the factor is found for the weight asked
+-- for. The limit is stricter than stabilizeNodes' (which lightens nothing around the point it makes
+-- heavier): here the neighbours get lighter too, and two light points on one stiff beam swing sqrt 2
+-- times faster than one alone - omega * dt <= 1.4 per point blew the pigeon up at 1179 kg every
+-- time. So omega * dt <= 1.0 and damping * dt / mass <= 1.0; points with torsion bars or on a rail
+-- (their stiffness isn't a beam's) keep their mass.
+--------------------------------------------------------------------------------
+-- nodes, beams: a vehicle's (jbeam stage) or its vehicle data's. Returns per point {m, floor}
+-- of the ones that can be lightened, the mass of the rest, and the sum of both now
+S.massFloors = function(nodes, beams, defaultMass, vehicle)
+  local dt = 0.0005
+  local K, C = {}, {}
+  -- points a torsion bar or a slide node works on: kept as they are
+  local keep = {}
+  for _, sec in ipairs({'torsionbars', 'torsionHydros'}) do
+    for _, tb in pairs(type(vehicle) == 'table' and type(vehicle[sec]) == 'table' and vehicle[sec] or {}) do
+      if type(tb) == 'table' then
+        for _, key in ipairs({'id1', 'id2', 'id3', 'id4'}) do
+          if type(tb[key]) == 'number' then keep[tb[key]] = true end
+        end
+      end
+    end
+  end
+  for _, sn in pairs(type(vehicle) == 'table' and type(vehicle.slidenodes) == 'table' and vehicle.slidenodes or {}) do
+    if type(sn) == 'table' and type(sn.id) == 'number' then keep[sn.id] = true end
+  end
+  for _, b in pairs(type(beams) == 'table' and beams or {}) do
+    if type(b) == 'table' and b.beamType ~= 5 and type(b.id1) == 'number' and type(b.id2) == 'number' then
+      local k = 0
+      if type(b.beamSpring) == 'number' and b.beamSpring < 1e10 then k = b.beamSpring end
+      if b.beamType == 2 and type(b.beamLimitSpring) == 'number' and b.beamLimitSpring < 1e10 then k = math.max(k, b.beamLimitSpring) end
+      local c = 0
+      for _, key in ipairs({'beamDamp', 'beamDampRebound', 'beamDampFast', 'beamDampReboundFast', 'beamLimitDamp', 'beamLimitDampRebound'}) do
+        if type(b[key]) == 'number' and b[key] < 1e9 then c = math.max(c, b[key]) end
+      end
+      for _, cid in ipairs({b.id1, b.id2}) do
+        K[cid] = (K[cid] or 0) + k
+        C[cid] = (C[cid] or 0) + c
+      end
+    end
+  end
+  local list, fixed, total = {}, 0, 0
+  for cid, n in pairs(type(nodes) == 'table' and nodes or {}) do
+    if type(n) == 'table' then
+      local m = tonumber(n.nodeWeight) or defaultMass
+      total = total + m
+      if n.wheelID ~= nil or keep[n.cid or cid] then
+        fixed = fixed + m
+      else
+        -- omega * dt <= 1.0 (K dt^2 / m <= 1), damping * dt / mass <= 1.0
+        local floor = math.max((K[cid] or 0) * dt * dt, (C[cid] or 0) * dt, 0.05)
+        list[#list + 1] = {cid = cid, m = m, floor = math.min(m, floor)}
+      end
+    end
+  end
+  return list, fixed, total
+end
+
+-- the factor that gives the weight asked for, and the weights it can reach: {factor, natural, min, result}
+S.massPlan = function(list, fixed, total, target)
+  local function at(f)
+    local s = fixed
+    for _, e in ipairs(list) do s = s + math.max(e.m * f, e.floor) end
+    return s
+  end
+  local lo, hi = 0, 1
+  local minTotal = at(0)
+  if not target or target >= total then return {factor = 1, natural = total, min = minTotal, result = total} end
+  if target <= minTotal then return {factor = 0, natural = total, min = minTotal, result = minTotal} end
+  for _ = 1, 40 do
+    local mid = (lo + hi) / 2
+    if at(mid) > target then hi = mid else lo = mid end
+  end
+  return {factor = lo, natural = total, min = minTotal, result = at(lo)}
+end
+
+-- at load (the last step before the settle time): the car made as light as asked
+-- (cfg.partAttacher.targetMass, kg); vehicle.upaWeightInfo keeps what it was for the window
+S.applyTargetMass = function(vehicle, target)
+  local defaultMass = tonumber(type(vehicle.options) == 'table' and vehicle.options.nodeWeight) or 25
+  local list, fixed, total = S.massFloors(vehicle.nodes, vehicle.beams, defaultMass, vehicle)
+  local plan = S.massPlan(list, fixed, total, tonumber(target))
+  if plan.factor < 1 then
+    for _, e in ipairs(list) do
+      local n = vehicle.nodes[e.cid]
+      if n then n.nodeWeight = math.max(e.m * plan.factor, e.floor) end
+    end
+  end
+  vehicle.upaWeightInfo = {natural = plan.natural, min = plan.min, result = plan.result, target = tonumber(target)}
+  return string.format('%.0f kg -> %.0f kg (asked %.0f, the lightest it can be %.0f; factor %.2f, wheels kept)',
+    plan.natural, plan.result, tonumber(target) or 0, plan.min, plan.factor)
 end
 
 -- independent swapped bundle: its own beams (not the tyres) and the car's body around the nodes it
@@ -3711,8 +4705,61 @@ local function addWelds(vehicle, isPart, isBody, ex, label)
   return count
 end
 
--- an added part with physics on a virtual mount: 8 light frame points around it hold every node of
--- the part (a rigid cage), and only those points are welded to the car's structure (chassis / frame
+-- which points of an added part the virtual mount's cage holds. Light ones (under S.cageLightMass:
+-- a wing's skin, its side plates) ride on the part's own beams, as on their own car: the cage's 8
+-- beams on each of them took the 2 kHz step past what such a point can take (the scintilla's frame
+-- mounted wing, 0.2 kg points, blew the car up at once; a supercharger's 0.3 kg pulley points did
+-- before). Only those the part's own beams tie to a held point: a light part hanging on nothing
+-- else stays held whole. Returns the held points and how many ride. They don't push the car's body
+-- (as the held ones don't).
+S.cageLightMass = 0.35
+S.cageNodes = function(vehicle, list, defaultMass)
+  local inPart, heavy = {}, {}
+  for _, n in ipairs(list) do
+    inPart[n.cid] = true
+    if (tonumber(n.nodeWeight) or defaultMass) >= S.cageLightMass then heavy[n.cid] = true end
+  end
+  if next(heavy) == nil then return list, 0 end
+  -- the part's own beams between its points: not broken (5) or push-only (7) ones, nor damping-only
+  local adj = {}
+  for _, b in pairs(vehicle.beams or {}) do
+    if type(b) == 'table' and inPart[b.id1] and inPart[b.id2] and b.id1 ~= b.id2 and b.beamType ~= 5 and b.beamType ~= 7
+      and (tonumber(b.beamSpring) or 1) > 0 then
+      adj[b.id1] = adj[b.id1] or {}
+      adj[b.id2] = adj[b.id2] or {}
+      table.insert(adj[b.id1], b.id2)
+      table.insert(adj[b.id2], b.id1)
+    end
+  end
+  local reached, queue, qi = {}, {}, 1
+  for cid in pairs(heavy) do
+    reached[cid] = true
+    queue[#queue + 1] = cid
+  end
+  while qi <= #queue do
+    local cid = queue[qi]
+    qi = qi + 1
+    for _, o in ipairs(adj[cid] or {}) do
+      if not reached[o] then
+        reached[o] = true
+        queue[#queue + 1] = o
+      end
+    end
+  end
+  local hold, riding = {}, 0
+  for _, n in ipairs(list) do
+    if heavy[n.cid] or not reached[n.cid] then
+      hold[#hold + 1] = n
+    else
+      n.selfCollision = false
+      riding = riding + 1
+    end
+  end
+  return hold, riding
+end
+
+-- an added part with physics on a virtual mount: 8 light frame points around it hold the nodes of
+-- the part (a rigid cage; S.cageNodes), and only those points are welded to the car's structure (chassis / frame
 -- / body nodes, spread, stiffness sized to the node masses). The part keeps its weight, its own
 -- beams and its collisions; no node of the car carries a node of the part directly. hooks: only
 -- these nodes are held by the cage (a hitch's mount points), the rest moves on the part's own beams.
@@ -3721,7 +4768,9 @@ S.mountExtra = function(vehicle, i, ex, isPart, isBody, hooks)
   local list, mass = {}, 0
   local lo, hi = vec3(math.huge, math.huge, math.huge), vec3(-math.huge, -math.huge, -math.huge)
   for _, n in pairs(vehicle.nodes) do
-    if type(n) == 'table' and n.pos and isPart(n) then
+    -- not the 0.3 kg points brought along for its props (S.addPropAnchors): the cage's 8 stiff beams
+    -- on each of them blew the car up (a supercharger's pulley points); they follow on their own beams
+    if type(n) == 'table' and n.pos and isPart(n) and not n.upaPropAnchor then
       list[#list + 1] = n
       mass = mass + (tonumber(n.nodeWeight) or defaultMass)
       lo:set(math.min(lo.x, n.pos.x), math.min(lo.y, n.pos.y), math.min(lo.z, n.pos.z))
@@ -3729,7 +4778,10 @@ S.mountExtra = function(vehicle, i, ex, isPart, isBody, hooks)
     end
   end
   if #list == 0 then return 0, 0, 0 end
-  if ex.noCollision then
+  -- a second engine sits in the engine bay among the car's own engine, radiator and body: the car's
+  -- points inside its block (deeper than S.unblockOverlaps' 4 cm) were shoved out at once - the car
+  -- "exploded" on attaching. It never collides (it is inside the car anyway)
+  if ex.noCollision or ex.engine2 then
     local set = {}
     for _, n in ipairs(list) do
       n.collision, n.staticCollision = false, true
@@ -3762,8 +4814,17 @@ S.mountExtra = function(vehicle, i, ex, isPart, isBody, hooks)
   local function isFrame(n) return frameSet[n.cid] == true end
   local perCorner = math.max(2, math.min(8, math.floor((tonumber(ex.welds) or 10) / 3 + 0.5)))
   local reach = math.max(1.0, (tonumber(ex.maxGap) or 0.3) * 3)
+  local hold = hooks
+  if not hold then
+    local riding
+    hold, riding = S.cageNodes(vehicle, list, defaultMass)
+    if riding > 0 then
+      log('I', logTag, string.format('extra part %d: %d light points (under %.2f kg) ride on the part\'s own beams, %d held by the mount',
+        i, riding, S.cageLightMass, #hold))
+    end
+  end
   local count, loose = weldEachToNearest(vehicle, isFrame, isBody,
-    {strength = ex.strength, rigidFrame = true, hookNodes = hooks or list, spread = true}, perCorner, reach, nil, nil)
+    {strength = ex.strength, rigidFrame = true, hookNodes = hold, spread = true}, perCorner, reach, nil, nil)
   stabilizeNodes(vehicle, frameSet, 'extra part ' .. i .. ' mount')
   return count, loose or 0, mass
 end
@@ -4407,6 +5468,42 @@ local function findTreeNode(node, pred)
   end
 end
 
+-- the sub part choices made in the game's Parts menu (wheels, tyres, struts...) under the car's
+-- tree node pred finds, as a copy: a part taken off the car (Move) carries them in its preview
+-- (preset.subTree) and gets them back when attached again
+S.treeChildren = function(target, pred)
+  local d = core_vehicle_manager.getVehicleData(target:getID())
+  local node = d and d.config and findTreeNode(d.config.partsTree, pred)
+  return node and type(node.children) == 'table' and deepcopy(node.children) or nil
+end
+
+-- a swap's slot in the car's tree changes hands (the car's own part <-> the swapped-in alias): the
+-- Parts menu choices under it go with what they belong to, not back to the defaults (new wheels on
+-- a swapped rear suspension came back as the spawn's after Move). spec.origTree keeps the car's own
+-- part's (back when the swap is undone or moved); spec.subTree is the swapped-in part's own, brought
+-- back from its preview (used once, not kept); the same part put in again keeps what it has.
+-- Call before node.chosenPartName changes. old: the swap's spec before (nil: none).
+S.swapTreeChildren = function(node, spec, old, alias)
+  if not node then return end
+  if spec then
+    local isAlias = node.chosenPartName == alias
+    if not isAlias then
+      spec.origTree = type(node.children) == 'table' and deepcopy(node.children) or nil
+    elseif type(old) == 'table' then
+      spec.origTree = spec.origTree or old.origTree
+    end
+    local samePart = isAlias and type(old) == 'table' and old.part == spec.part and old.model == spec.model
+    if type(spec.subTree) == 'table' then
+      node.children = spec.subTree
+    elseif not samePart then
+      node.children = nil -- another part's sub slots don't fit this one
+    end
+    spec.subTree = nil
+  else
+    node.children = type(old) == 'table' and type(old.origTree) == 'table' and old.origTree or nil
+  end
+end
+
 -- auto undo: every change the mod makes to a car keeps the config the car had, and where it stood,
 -- for 20 s. If the game finds the car unstable in that time (its physics blew up), the change is
 -- undone at once (M.onInstabilityDetected)
@@ -4452,6 +5549,16 @@ S.onInstability = function(vid, returnData)
   veh:respawn(serialize(u.config))
   if type(returnData) == 'table' then returnData.instabilityHandled = true end
   log('W', logTag, 'the car went unstable right after a change: the change was undone')
+  -- a weight asked for in section 3 that was too light: said so, kept for the window
+  local wt = S.weightTry
+  if wt and wt.vid == vid and os.clock() - wt.at < 30 then
+    S.weightTry = nil
+    S.weightFailed = S.weightFailed or {}
+    S.weightFailed[vid] = wt.want
+    log('W', logTag, string.format('target weight %d kg was too light for this car: undone', wt.want))
+    msg(string.format('%d kg per lengva - fizika tapo nestabili, svoris grazintas. Pabandyk didesni.', wt.want), 10)
+    return
+  end
   msg('Masina tapo nestabili po pakeitimo - jis atsauktas, masina grazinta i buvusia.', 10)
 end
 
@@ -4467,19 +5574,58 @@ local function respawnWithConfig(target, mutate)
   return true
 end
 
+-- an added part as one key (its donor, part and place), to find it again in the new list
+S.extraKey = function(ex)
+  local function v3(t)
+    t = type(t) == 'table' and t or {}
+    return string.format('%.4f,%.4f,%.4f', tonumber(t[1]) or 0, tonumber(t[2]) or 0, tonumber(t[3]) or 0)
+  end
+  local sc = type(ex.scale) == 'table' and v3(ex.scale) or tostring(ex.scale)
+  return table.concat({tostring(ex.model), tostring(ex.part), v3(ex.move), v3(ex.rot), v3(ex.pivot), sc, tostring(ex.meshOnly)}, '|')
+end
+
 -- also(cfg): more changes to the config in the same respawn (a front end empties the car's own front slots)
 local function respawnWithExtras(target, extras, also)
   return respawnWithConfig(target, function(cfg)
+    local children = type(cfg.partsTree) == 'table' and type(cfg.partsTree.children) == 'table' and cfg.partsTree.children or nil
+    -- the Parts menu choices under each added part's slot, to go with that part to its new slot
+    -- (removing one shifts the others' numbers; a moved one brings its own - ex.subTree)
+    local oldTrees = {}
+    if children then
+      for i, old in ipairs(type(cfg.partAttacher.extraParts) == 'table' and cfg.partAttacher.extraParts or {}) do
+        local node = children[extraSlotPrefix .. i]
+        if type(old) == 'table' and type(node) == 'table' and type(node.children) == 'table' then
+          oldTrees[#oldTrees + 1] = {key = S.extraKey(old), children = node.children}
+        end
+      end
+    end
     cfg.partAttacher.extraParts = extras
     -- forget old choices of our slots, the indices may have shifted
-    if type(cfg.partsTree) == 'table' and type(cfg.partsTree.children) == 'table' then
-      for slotId, _ in pairs(cfg.partsTree.children) do
-        if type(slotId) == 'string' and slotId:sub(1, #extraSlotPrefix) == extraSlotPrefix then cfg.partsTree.children[slotId] = nil end
+    if children then
+      for slotId, _ in pairs(children) do
+        if type(slotId) == 'string' and slotId:sub(1, #extraSlotPrefix) == extraSlotPrefix then children[slotId] = nil end
       end
     end
     if type(cfg.parts) == 'table' then
       for slotId, _ in pairs(cfg.parts) do
         if type(slotId) == 'string' and slotId:find(extraSlotPrefix, 1, true) then cfg.parts[slotId] = nil end
+      end
+    end
+    -- and back: each part's own choices under its slot now
+    for j, ex in ipairs(extras) do
+      if type(ex) == 'table' then
+        local sub = type(ex.subTree) == 'table' and ex.subTree or nil
+        ex.subTree = nil
+        if not sub then
+          local key = S.extraKey(ex)
+          for _, o in ipairs(oldTrees) do
+            if not o.used and o.key == key then
+              o.used, sub = true, o.children
+              break
+            end
+          end
+        end
+        if sub and children then children[extraSlotPrefix .. j] = {chosenPartName = extraAlias(j), children = sub} end
       end
     end
     if also then also(cfg) end
@@ -4670,11 +5816,13 @@ end
 
 local function respawnWithGearboxSwap(target, spec, replaces)
   return respawnWithConfig(target, function(cfg)
+    local old = cfg.partAttacher.gearboxSwap
     cfg.partAttacher.gearboxSwap = spec
     local node = findTreeNode(cfg.partsTree, treeNodeIsGearbox(replaces))
     if node then
+      -- the old gearbox's sub parts don't fit the new one: each keeps its own (S.swapTreeChildren)
+      S.swapTreeChildren(node, spec, old, gearboxAlias)
       node.chosenPartName = spec and gearboxAlias or replaces
-      node.children = nil -- the old gearbox's sub parts don't fit the new one
     end
   end)
 end
@@ -5310,9 +6458,18 @@ local function respawnWithPartSwap(target, kind, spec, replaces, drivetrain)
     local same = node ~= nil and spec ~= nil and type(old) == 'table' and swapKinds[kind] and swapKinds[kind].subframe
       and old.part == spec.part and old.model == spec.model and node.chosenPartName == alias
     if node then
+      -- struts, wheels... of the old part don't fit the new one: each part keeps its own Parts menu
+      -- choices (S.swapTreeChildren) - the car's own come back when the swap goes, the swapped-in
+      -- part's come back with it from its preview (Move)
+      if same then
+        spec.origTree = spec.origTree or old.origTree
+        spec.subTree = nil
+      else
+        S.swapTreeChildren(node, spec, old, alias)
+      end
       node.chosenPartName = spec and alias or (replaces or '')
-      if not same then node.children = nil end -- struts, wheels... of the old part don't fit the new one
     end
+    if spec then spec.subTree = nil end
     if not same then
       -- a swap that went into this kind's old tree goes with it
       for k2, s2 in pairs(swaps) do
@@ -5442,6 +6599,9 @@ local function swapPart(e, target)
     -- a front suspension used at the rear (the rear one, or an added rear axle): its wheels become
     -- rear wheels, its steering is locked
     asRear = (e.asRear and not (added and swapKinds[kind].front)) or nil,
+    -- its Parts menu choices (wheels...) when it came off the car (Move), back on it
+    subTree = type(e.subTree) == 'table' and deepcopy(e.subTree) or nil,
+    perAxis = e.perAxisPtr[0] or nil,
   }
   local imported, frame = prepareSuspensionBundle(target, spec)
   local drivetrain
@@ -5507,11 +6667,16 @@ local function swapEngine(e, target)
     move = {off.x, off.y, off.z},
     rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
     pivot = {e.pivot.x, e.pivot.y, e.pivot.z},
+    -- its size (the one the preview was built at): only the model, the physics stay the car's block
+    scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
+    -- power by size (S.enginePowerFactor): on unless switched off
+    scalePower = not ((e.scalePowerPtr and not e.scalePowerPtr[0]) or (not e.scalePowerPtr and e.scalePower == false)),
+    perAxis = e.perAxisPtr[0] or nil,
   }
   local info = data and engineInfo(data) or {}
   deleteEntry(e)
   if respawnWithSwap(target, spec, replaces) then
-    msg(string.format('Engine swap: %s -> %s (~%d kW bazine kreive)', tostring(replaces), tostring(e.partName), math.floor((info.kw or 0) + 0.5)), 6)
+    msg(string.format('Engine swap: %s -> %s (~%d kW bazine kreive)', tostring(replaces), tostring(e.partName), math.floor((info.kw or 0) * S.enginePowerFactor(spec) + 0.5)), 6)
   end
 end
 
@@ -5546,15 +6711,21 @@ local function swapGearbox(e, target)
     welds = math.max(1, S.maxWeldsPtr[0]),
     maxGap = S.maxGapPtr[0],
     strength = S.unbreakablePtr[0] and -1 or math.max(1000, S.strengthPtr[0]),
+    -- its size (the one the preview was built at): the gearbox tree grows / shrinks (S.scaleGearboxTree)
+    scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
+    -- its Parts menu choices when it came off the car (Move), back on it
+    subTree = type(e.subTree) == 'table' and deepcopy(e.subTree) or nil,
+    perAxis = e.perAxisPtr[0] or nil,
   }
   local useDrivetrain = S.autoDrivetrainPtr[0]
   deleteEntry(e)
   local ok = respawnWithConfig(target, function(cfg)
+    local old = cfg.partAttacher.gearboxSwap
     cfg.partAttacher.gearboxSwap = spec
     local node = findTreeNode(cfg.partsTree, treeNodeIsGearbox(replaces))
     if node then
+      S.swapTreeChildren(node, spec, old, gearboxAlias)
       node.chosenPartName = gearboxAlias
-      node.children = nil
     end
     if useDrivetrain then cfg.partAttacher.drivetrain = drivetrainSpecFromUI() end
   end)
@@ -5603,11 +6774,21 @@ local function mergeIntoTarget(e)
     frontEnd = frontEnd,
     skin = e.skin,
     noLogic = (e.noLogic and not meshOnly) or nil,
+    -- a second engine: its torque joins the car's engine (S.applyEngine2); with physics only
+    engine2 = (e.engine2 and not meshOnly) or nil,
     -- its sub parts ticked off in the "comes with" list (S.skipSubPart): a frame without its body...
     skip = (not meshOnly and not frontEnd and type(e.skip) == 'table' and #e.skip > 0) and deepcopy(e.skip) or nil,
     -- cut in its preview (S.cutPreview): only what was left of it
     cut = (not frontEnd and type(e.cut) == 'table') and deepcopy(e.cut) or nil,
+    -- its Parts menu choices when it came off the car (Move): back under its slot (respawnWithExtras)
+    subTree = (not meshOnly and type(e.subTree) == 'table') and deepcopy(e.subTree) or nil,
+    -- sized per axis (kept for Move / Copy, also at 1 / 1 / 1)
+    perAxis = e.perAxisPtr[0] or nil,
   })
+  -- a resized second engine's "power by size" switched off (S.enginePowerFactor: nil = on)
+  if e.engine2 and ((e.scalePowerPtr and not e.scalePowerPtr[0]) or (not e.scalePowerPtr and e.scalePower == false)) then
+    extras[#extras].scalePower = false
+  end
 
   deleteEntry(e)
   local also = replaced and #replaced > 0 and function(cfg) S.setTreeParts(cfg, replaced, '') end or nil
@@ -5655,17 +6836,26 @@ local function registerEntry(id, partName, model, target, preset)
     added = preset and preset.added,
     asRear = preset and preset.asRear or nil,
     mountRef = preset and preset.mountRef,
-    presetMove = preset and preset.move,
+    -- where the car's own engine / gearbox sits (a resized preview built again keeps it)
+    presetMove = preset and (preset.home or preset.move),
+    -- an engine preview's "power by size" (S.enginePowerFactor); nil = on
+    scalePower = preset and preset.scalePower,
     autoMove = preset and preset.auto and preset.move,
     off = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
     rot = {im.FloatPtr(0), im.FloatPtr(0), im.FloatPtr(0)},
     frontEnd = preset and type(preset.frontEnd) == 'table' and preset.frontEnd or nil,
     skin = preset and type(preset.skin) == 'string' and preset.skin or nil,
     noLogic = preset and preset.noLogic == true or nil, -- an installed "no logic" part taken off keeps it
+    engine2 = preset and preset.engine2 == true or nil, -- a second engine (S.spawnEngine2Ghost)
     -- sub parts ticked off in its "comes with" list (part names; S.drawSubParts)
     skip = preset and type(preset.skip) == 'table' and deepcopy(preset.skip) or nil,
     -- its own cut (S.cutPreview; an installed cut part taken off keeps it)
     cut = preset and type(preset.cut) == 'table' and deepcopy(preset.cut) or nil,
+    -- a mirrored copy's cut, made once the preview is up (S.spawnMirror, S.tickPendingCuts)
+    pendingCut = preset and type(preset.pendingCut) == 'table' and deepcopy(preset.pendingCut) or nil,
+    -- the Parts menu choices under it (wheels, tyres...) when it came off the car (Move): back on it
+    -- when attached (S.treeChildren)
+    subTree = preset and type(preset.subTree) == 'table' and deepcopy(preset.subTree) or nil,
     -- size: the factors the preview was built with ({x, y, z}; only those get attached) and the
     -- sliders (one for all axes, or one per axis)
     builtScale = preset and S.extraScale(preset) and {S.scaleAxes(preset.scale)} or {1, 1, 1},
@@ -5673,7 +6863,9 @@ local function registerEntry(id, partName, model, target, preset)
   local b = e.builtScale
   e.scale = im.FloatPtr(b[1])
   e.scaleAxis = {im.FloatPtr(b[1]), im.FloatPtr(b[2]), im.FloatPtr(b[3])}
-  e.perAxisPtr = im.BoolPtr(math.abs(b[1] - b[2]) > 1e-4 or math.abs(b[2] - b[3]) > 1e-4)
+  -- one slider per axis: when they differ, or when the player chose so (kept at 1 / 1 / 1 too: going
+  -- from 0.8 to 1.1 across 1.0 switched back to the one slider)
+  e.perAxisPtr = im.BoolPtr((preset and preset.perAxis == true) or math.abs(b[1] - b[2]) > 1e-4 or math.abs(b[2] - b[3]) > 1e-4)
   if preset then
     for i = 1, 3 do
       e.off[i][0] = preset.move and preset.move[i] or 0
@@ -5831,6 +7023,17 @@ local function spawnEngineGhost(model, enginePart, target)
   spawnGhost(model, enginePart, target, {mode = 'engine', replaces = replaces, move = {move.x, move.y, move.z}, rot = {0, 0, 0}})
 end
 
+-- a second engine: a preview of the donor engine as an added part with physics (S.prepareEngine2Part,
+-- S.applyEngine2), where the car's engine sits, raised above the hood to be moved where it goes
+S.spawnEngine2Ghost = function(model, enginePart, target)
+  local own = getTargetEngine(target:getID())
+  local tc = own and rawNodeCentroid(target.jbeam, own)
+  local dc = rawNodeCentroid(model, enginePart)
+  local move = (tc and dc) and (tc - dc + vec3(0, 0, 0.6)) or vec3(0, 0, 0.6)
+  spawnGhost(model, enginePart, target, {mode = 'part', engine2 = true, move = {move.x, move.y, move.z}, rot = {0, 0, 0}})
+  msg('Antras variklis: pastumk ji i vieta ir PRITVIRTINK. Jo sukimo momentas prisides prie tavo variklio.', 8)
+end
+
 -- ghost of a donor gearbox, placed where the car's gearbox sits
 local function spawnGearboxGhost(model, gearboxPart, target)
   local replaces = getTargetGearbox(target:getID())
@@ -5912,6 +7115,10 @@ local function editPartSwap(target, kind)
   if not spec then return end
   local preset = deepcopy(spec)
   preset.mode, preset.kind = 'partswap', kind
+  -- its wheels, tyres... as picked in the Parts menu: back on it when attached again
+  local alias = partSwapAlias(kind)
+  preset.subTree = S.treeChildren(target, function(n) return n.chosenPartName == alias end)
+  preset.origTree = nil
   removePartSwap(target, kind)
   spawnGhost(spec.model, spec.part, target, preset)
 end
@@ -7039,14 +8246,33 @@ S.counterpartName = function(model, partName)
   return nil
 end
 
--- preview of the mirrored copy of a part placed with move / rot / pivot (tables of 3), same scale
-S.spawnMirror = function(target, model, partName, move, rot, pivot, meshOnly, scale)
+-- a part's cut (S.cutPreview) as its mirrored copy needs it: every shape flipped across x = about
+-- (the car's middle for the other side's part - door_FL's cut on door_FR -, the part's own middle
+-- for the same part placed mirrored): its centre's x mirrored, its lean to a side (ry) and its turn
+-- about the vertical (rz) the other way, its tilt (rx) and sizes as they are. The cut lives in the
+-- preview's own (sized) jbeam space, which for the other side's part is the original's mirrored.
+S.mirrorCutList = function(cut, about)
+  local out = {}
+  for _, c in ipairs(S.cutList(cut)) do
+    local m = deepcopy(c)
+    m.cx = 2 * about - (tonumber(m.cx) or 0)
+    if tonumber(m.ry) then m.ry = -tonumber(m.ry) end
+    if tonumber(m.rz) then m.rz = -tonumber(m.rz) end
+    out[#out + 1] = m
+  end
+  return out
+end
+
+-- preview of the mirrored copy of a part placed with move / rot / pivot (tables of 3), same scale;
+-- cut: the part's own cut, the copy gets it mirrored once its preview is up (updateEntry)
+S.spawnMirror = function(target, model, partName, move, rot, pivot, meshOnly, scale, cut, perAxis)
   if not target then msg('Isek i masina.', 5) return end
   move, rot = move or {0, 0, 0}, rot or {0, 0, 0}
   local counterpart = S.counterpartName(model, partName)
   local part = counterpart or partName
-  local preset = {rot = {rot[1], -rot[2], -rot[3]}, scale = pivot and scale or nil}
+  local preset = {rot = {rot[1], -rot[2], -rot[3]}, scale = pivot and scale or nil, perAxis = perAxis or nil}
   local meshNodes = meshOnly and S.meshNodesFor(model, part) or nil
+  local cutAbout = 0
   if counterpart then
     preset.move = {-move[1], move[2], move[3]}
     if pivot then preset.pivot = {-pivot[1], pivot[2], pivot[3]} end
@@ -7071,11 +8297,14 @@ S.spawnMirror = function(target, model, partName, move, rot, pivot, meshOnly, sc
     local newMove = target2 - (eulerToQuat(preset.rot[1], preset.rot[2], preset.rot[3]) * (c0 - pv) + pv)
     preset.move = {newMove.x, newMove.y, newMove.z}
     preset.pivot = {pv.x, pv.y, pv.z}
+    cutAbout = c0.x
   end
   if meshOnly then
     if not meshNodes or #meshNodes == 0 then msg('Si detale neturi modelio (tik duomenys) - nera ka parodyti.', 6) return end
     preset.mode, preset.meshNodes = 'meshonly', meshNodes
   end
+  local cuts = S.mirrorCutList(cut, cutAbout)
+  if #cuts > 0 then preset.pendingCut = cuts end
   spawnGhost(model, part, target, preset)
   msg(counterpart and string.format('Veidrodine kopija: %s -> %s. Pastumdyk, jei reikia, ir PRITVIRTINK.', partName, counterpart)
     or string.format('Veidrodine kopija: %s (kitos puses detales nera - ta pati, pastatyta veidrodiskai). PRITVIRTINK.', partName), 8)
@@ -7086,6 +8315,249 @@ end
 -- car's bumper, a hood on its hood): the slots are matched by type without the model prefix
 -- (pickup_bumper_F ~ etk800_bumper_F), the part centres are lined up
 --------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- interior swap (tab "Salonas"): the car's steering wheel, shifter or seat keeps its part - its
+-- points, beams, its place and its logic (the wheel turns with the steering, the lever with the
+-- gears, the driver sits where he sat) - but wears another car's models. spec = {kind, carPart,
+-- model, part, move, adjust}: move from the donor part's place to the car part's (found on
+-- swapping), adjust the player's correction, both {x, y, z} in the car's jbeam space.
+--------------------------------------------------------------------------------
+S.interiorKinds = {steer = 'Vairas', shifter = 'Pavaru rankena', seat = 'Sedyne'}
+
+-- the kind of a slot by its name or type ("etk800_steer", "pickup_shifter", "etk800_seat_FR"). A
+-- steering wheel's has "steer" as a word of its own: the us_semi's "..._twinsteer" axles, air tanks
+-- and brake valves are not; the seats' "..._occupants" are the people, not seats
+S.interiorKind = function(name)
+  local s = tostring(name or ''):lower()
+  if s:find('seatbelt', 1, true) or s:find('occupant', 1, true) then return nil end
+  if s:find('steeringwheel', 1, true) or s:find('steering_wheel', 1, true) or s:find('steer_wheel', 1, true) then return 'steer' end
+  for word in s:gmatch('[^_]+') do
+    if word:match('^steer%d*$') then return 'steer' end
+  end
+  if s:find('shifter', 1, true) or s:find('gearshift', 1, true) or s:find('shift_lever', 1, true) or s:find('shiftknob', 1, true) then return 'shifter' end
+  if s:find('seat', 1, true) then return 'seat' end
+  return nil
+end
+
+-- the node groups a part's models hang on (its flexbodies' [group] lists)
+S.flexGroupsOf = function(part)
+  local seen, out = {}, {}
+  for i, row in ipairs(type(part) == 'table' and type(part.flexbodies) == 'table' and part.flexbodies or {}) do
+    if i > 1 and type(row) == 'table' and type(row[1]) == 'string' and type(row[2]) == 'table' then
+      for _, g in ipairs(row[2]) do
+        if type(g) == 'string' and g ~= '' and not seen[g] then
+          seen[g] = true
+          out[#out + 1] = g
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- where a part sits, for the swap: a seat / shifter by its own points, a steering wheel where its
+-- turning model sits (S.propPlaceLook: its model file's place, or its offset from its car's points
+-- - the common wheels sit at 0 in their file); else its first model's place
+S.interiorCenter = function(model, partName, kind)
+  local okCtx, ioCtx = pcall(jbeamIO.startLoading, modelDirs(model))
+  local part = okCtx and jbeamIO.getPart(ioCtx, partName)
+  if type(part) ~= 'table' then return nil end
+  if kind ~= 'steer' then
+    local c = partNodeCentroid(part)
+    if c then return c end
+  end
+  local dirs = modelDirs(model)
+  local function real(p) return p and math.abs(p.x) + math.abs(p.y) + math.abs(p.z) > 1e-3 end
+  local pr = part.props
+  if type(pr) == 'table' and type(pr[1]) == 'table' then
+    local c = S.propCols(pr)
+    local nodes = S.propNodesOf(part, model, pr, c)
+    local wheel, other
+    S.eachPropRow(pr, function(_, row, opts)
+      local m = row[c.mesh or 0]
+      if type(m) ~= 'string' or m == 'SPOTLIGHT' or m == 'POINTLIGHT' then return end
+      local p = S.propPlaceLook(row, c, opts, nodes, dirs)
+      if not real(p) then return end
+      if kind == 'steer' and row[c.func or 0] == 'steering' then wheel = wheel or p else other = other or p end
+    end)
+    if wheel or other then return wheel or other end
+  end
+  for i, row in ipairs(type(part.flexbodies) == 'table' and part.flexbodies or {}) do
+    if i > 1 and type(row) == 'table' and type(row[1]) == 'string' then
+      local p = S.daeNodePos(row[1], dirs)
+      if p and real(p) then return vec3(p.x, p.y, p.z) end
+    end
+  end
+  if kind == 'steer' then return partNodeCentroid(part) end
+  return nil
+end
+
+-- the move that puts the donor part where the car's own one is ({x, y, z}; zeros when unknown),
+-- whether it was found, and that spot (the player's turn goes about it)
+S.interiorAutoMove = function(target, carPart, model, partName, kind)
+  local c = S.interiorCenter(target.jbeam, carPart, kind)
+  local d = S.interiorCenter(model, partName, kind)
+  local pivot = c and {c.x, c.y, c.z} or nil
+  if not (c and d) then return {0, 0, 0}, false, pivot end
+  local mv = c - d
+  return {mv.x, mv.y, mv.z}, true, pivot
+end
+
+-- the parts of a kind in all cars, mods' too, for the swap list (from the search list in all cars,
+-- S.idx): by car, then name, the common parts last. A steering wheel has to have a turning wheel
+-- model (a "steering" prop). Kept with that list; nil while it is being read.
+S.interiorDonorsAll = function(kind)
+  local x = S.idx
+  if not (x and x.done) then return nil end
+  x.intLists = x.intLists or {}
+  if x.intLists[kind] then return x.intLists[kind] end
+  local out = {}
+  for _, p in ipairs(x.list) do
+    if S.interiorKind(p.slot) == kind and (kind ~= 'steer' or p.steer) then
+      local car = x.labels[p.model] or tostring(p.model)
+      out[#out + 1] = {p = p, car = car, sort = (p.model == 'common' and '~' or '') .. car:lower() .. '|' .. p.label:lower()}
+    end
+  end
+  table.sort(out, function(a, b) return a.sort < b.sort end)
+  x.intLists[kind] = out
+  return out
+end
+
+-- the car's part with the donor's models: the donor's meshes on the node groups the car part's own
+-- meshes hung on (a seat's frame points, the floor), the donor's props (the turning wheel, the
+-- moving lever) on the car part's own prop frames (its dash points) - placed by their model file's
+-- pivot (S.placeExtraProps) - all moved by spec.move + spec.adjust. Its points and beams stay.
+S.buildInteriorPart = function(ioCtx, partName, spec)
+  local part, filename = origGetPart(ioCtx, partName)
+  local donor, donorFile = origGetPart(ioCtx, spec.part)
+  if type(part) ~= 'table' or type(donor) ~= 'table' then return part, filename end
+  local mv, rt = {}, {}
+  for i = 1, 3 do
+    mv[i] = (tonumber(type(spec.move) == 'table' and spec.move[i]) or 0) + (tonumber(type(spec.adjust) == 'table' and spec.adjust[i]) or 0)
+    rt[i] = tonumber(type(spec.rot) == 'table' and spec.rot[i]) or 0
+  end
+  -- a high index: applied after any move / turn the car part's slot gives it
+  local moveRow = {x = mv[1], y = mv[2], z = mv[3]}
+  -- the player's turn (degrees, like the part tab's), about the spot the part now sits at: index 10,
+  -- after the move. Props get it as their turn too (S.orientInteriorProps).
+  local hasRot = math.abs(rt[1]) + math.abs(rt[2]) + math.abs(rt[3]) > 1e-3
+  local turnRow
+  if hasRot then
+    local pv = type(spec.pivot) == 'table' and spec.pivot or nil
+    local c = pv and vec3(tonumber(pv[1]) or 0, tonumber(pv[2]) or 0, tonumber(pv[3]) or 0) or partNodeCentroid(part)
+    if c then turnRow = {x = rt[1], y = rt[2], z = rt[3], px = c.x, py = c.y, pz = c.z} end
+  end
+  local groups = S.flexGroupsOf(part)
+  if #groups == 0 then groups = partNodeGroups(part) end
+  local meshes, props = 0, 0
+  local dfb = donor.flexbodies
+  if type(dfb) == 'table' and type(dfb[1]) == 'table' and #groups > 0 then
+    local fb = {deepcopy(dfb[1]), {nodeMove9 = moveRow, nodeRotate10 = turnRow}}
+    for i = 2, #dfb do
+      local row = dfb[i]
+      if type(row) == 'table' and type(row[1]) == 'string' then
+        local copy = deepcopy(row)
+        copy[2] = deepcopy(groups)
+        fb[#fb + 1] = copy
+        meshes = meshes + 1
+      elseif type(row) == 'table' then
+        fb[#fb + 1] = deepcopy(row)
+      end
+    end
+    fb[#fb + 1] = {nodeMove9 = '', nodeRotate10 = ''}
+    part.flexbodies = meshes > 0 and fb or nil
+  else
+    part.flexbodies = nil
+  end
+  local dpr, cpr = donor.props, part.props
+  local placed = 0
+  if type(dpr) == 'table' and type(dpr[1]) == 'table' then
+    local dc, cc = S.propCols(dpr), S.propCols(cpr)
+    -- where each donor prop sits on the donor and how it is turned there (on the donor's points):
+    -- one placed by an offset from its points (the common wheels) keeps that place as a point of
+    -- its own, so the move takes it where the car's own sits
+    local places = {}
+    local okN, dnodes = pcall(S.propNodesOf, donor, spec.model, dpr, dc)
+    if okN and type(dnodes) == 'table' then
+      local ddirs = modelDirs(spec.model)
+      S.eachPropRow(dpr, function(i, row, opts)
+        local okP, pos, look = pcall(S.propPlaceLook, row, dc, opts, dnodes, ddirs)
+        if okP then
+          places[i] = {pos = (opts.baseTranslation or opts.baseTranslationGlobal) and pos or nil, look = look}
+        end
+      end)
+    end
+    -- the car part's own frames by function (its steering wheel's three dash points...)
+    local frames, firstFrame, carSteer = {}, nil, nil
+    if cc.ref and cc.x and cc.y then
+      for i = 2, #cpr do
+        local row = cpr[i]
+        if type(row) == 'table' and type(row[cc.ref]) == 'string' then
+          local f = {row[cc.ref], row[cc.x], row[cc.y]}
+          firstFrame = firstFrame or f
+          local fn = cc.func and row[cc.func]
+          if type(fn) == 'string' and not frames[fn] then frames[fn] = f end
+          -- the car's own steering wheel: its turn and turning axis (the column) for the donor's
+          if fn == 'steering' and not carSteer and cc.rot and type(row[cc.rot]) == 'table' then
+            carSteer = {base = cc.base and type(row[cc.base]) == 'table' and deepcopy(row[cc.base]) or {x = 0, y = 0, z = 0}, spin = deepcopy(row[cc.rot])}
+          end
+        end
+      end
+    end
+    local dir = type(donorFile) == 'string' and donorFile:match('^(.*/)') or ''
+    local out = {deepcopy(dpr[1]), {upaPropFix = true, upaScale = '', upaDaeDir = dir, nodeMove9 = moveRow, nodeRotate10 = turnRow,
+      upaIntSwap = true, upaIntRot = hasRot and {rt[1], rt[2], rt[3]} or ''}}
+    local width = #dpr[1]
+    for i = 2, #dpr do
+      local row = dpr[i]
+      if type(row) == 'table' and type(row[1]) == 'string' then
+        local copy = deepcopy(row)
+        local fn = dc.func and copy[dc.func]
+        local f = (type(fn) == 'string' and frames[fn]) or firstFrame
+        if f and dc.ref and dc.x and dc.y then copy[dc.ref], copy[dc.x], copy[dc.y] = f[1], f[2], f[3] end
+        -- its own options (a table past the columns)
+        local opts = #copy > width and type(copy[#copy]) == 'table' and copy[#copy] or nil
+        if not opts and #copy == width then
+          opts = {}
+          copy[#copy + 1] = opts
+        end
+        if opts then
+          -- its place: where it sat on the donor (its model file's place, S.placeExtraProps, or the
+          -- point its offset gave it), then the move - not its offset from the car's other points
+          opts.baseTranslation, opts.baseTranslationGlobal = nil, nil
+          local pl = places[i]
+          if pl and pl.pos then
+            opts.baseTranslationGlobal = {x = pl.pos.x, y = pl.pos.y, z = pl.pos.z}
+            placed = placed + 1
+          end
+          if pl and pl.look then
+            local m = pl.look
+            opts.upaIntLook = {m[1][1], m[1][2], m[1][3], m[2][1], m[2][2], m[2][3], m[3][1], m[3][2], m[3][3]}
+          end
+          if carSteer and fn == 'steering' then opts.upaIntBase, opts.upaIntSpin = carSteer.base, carSteer.spin end
+        end
+        out[#out + 1] = copy
+        props = props + 1
+      elseif type(row) == 'table' then
+        local copy = deepcopy(row)
+        copy.baseTranslation, copy.baseTranslationGlobal = nil, nil
+        out[#out + 1] = copy
+      end
+    end
+    out[#out + 1] = {upaPropFix = '', upaScale = '', upaDaeDir = '', nodeMove9 = '', nodeRotate10 = '', upaIntSwap = '', upaIntRot = ''}
+    part.props = out
+  else
+    part.props = nil
+  end
+  -- the parts menu: the donor part's name on the car's
+  local info = type(donor.information) == 'table' and donor.information or {}
+  pcall(S.noteUi, ioCtx, partName, {description = string.format('%s (%s)', tostring(info.name or spec.part), tostring(spec.model))})
+  log('I', logTag, string.format('interior swap %s: %s of %s (%d models, %d props%s), moved %.2f %.2f %.2f, turned %.1f %.1f %.1f', tostring(partName),
+    tostring(spec.part), tostring(spec.model), meshes, props, placed > 0 and string.format(', %d placed by their offset on the donor', placed) or '',
+    mv[1], mv[2], mv[3], rt[1], rt[2], rt[3]))
+  return part, filename
+end
 
 S.autoFitMove = function(target, model, partName, meshNodes)
   local okCtx, ioCtx = pcall(jbeamIO.startLoading, modelDirs(model))
@@ -7678,9 +9150,18 @@ S.reportRiskiestNodes = function(vehicle)
     local e = list[i]
     parts[#parts + 1] = string.format('%s (%s) %.2f kg w*dt %.2f c*dt/m %.2f', tostring(e.n.name), tostring(e.n.partOrigin), e.m, e.wdt, e.cdt)
   end
-  log('I', logTag, 'body swap node check, riskiest: ' .. table.concat(parts, '; '))
-  if zero > 0 then log('W', logTag, string.format('body swap node check: %d beams of no length (%s)', zero, table.concat(zeroList, ', '))) end
-  if noPos > 0 then log('W', logTag, string.format('body swap node check: %d nodes without a position', noPos)) end
+  log('I', logTag, 'node check, riskiest: ' .. table.concat(parts, '; '))
+  -- by stiffness alone too: the car's own damped points (seats, tyres) fill the list above, and a
+  -- light point near w*dt 2 (what blows up) hid behind them
+  table.sort(list, function(a, b) return a.wdt > b.wdt end)
+  local stiff = {}
+  for i = 1, math.min(6, #list) do
+    local e = list[i]
+    stiff[#stiff + 1] = string.format('%s (%s) %.2f kg w*dt %.2f', tostring(e.n.name), tostring(e.n.partOrigin), e.m, e.wdt)
+  end
+  log('I', logTag, 'node check, stiffest: ' .. table.concat(stiff, '; '))
+  if zero > 0 then log('W', logTag, string.format('node check: %d beams of no length (%s)', zero, table.concat(zeroList, ', '))) end
+  if noPos > 0 then log('W', logTag, string.format('node check: %d nodes without a position', noPos)) end
 end
 
 -- a body swap with "hide my own body": the car's own body parts (all but its running gear) stay as
@@ -8009,19 +9490,30 @@ S.respawnGhost = function(e, meshOnly)
     pivot = {e.pivot.x, e.pivot.y, e.pivot.z},
     skin = e.skin,
     noLogic = e.noLogic,
+    engine2 = e.engine2,
     skip = e.skip or {}, -- (an empty list: everything ticked, a subframe's engine too)
     cut = e.cut,
+    subTree = e.subTree,
   }
+  if e.engine2 then
+    if e.scalePowerPtr then preset.scalePower = e.scalePowerPtr[0] else preset.scalePower = e.scalePower end
+  end
   if e.mode == 'partswap' then
     -- a swap preview stays one (its "comes with" list changed)
     preset.mode, preset.kind, preset.replaces, preset.added, preset.mountRef = 'partswap', e.kind, e.replaces, e.added, e.mountRef
     preset.asRear = e.asRear
+  elseif e.mode == 'engine' or e.mode == 'gearbox' then
+    -- an engine / gearbox swap preview stays one (resized)
+    preset.mode, preset.replaces, preset.home = e.mode, e.replaces, e.presetMove
+    if e.scalePowerPtr then preset.scalePower = e.scalePowerPtr[0] else preset.scalePower = e.scalePower end
   end
   if e.perAxisPtr[0] then
     preset.scale = S.scaleValue(e.scaleAxis[1][0], e.scaleAxis[2][0], e.scaleAxis[3][0])
   else
     preset.scale = S.scaleValue(e.scale[0], e.scale[0], e.scale[0])
   end
+  -- the per-axis sliders stay chosen, also at 1 / 1 / 1
+  preset.perAxis = e.perAxisPtr[0] or nil
   if meshOnly == nil then meshOnly = e.mode == 'meshonly' end
   if e.frontEnd then
     -- a front end is never a model only part
@@ -8032,7 +9524,7 @@ S.respawnGhost = function(e, meshOnly)
     local nodes = e.mode == 'meshonly' and e.meshNodes or S.meshNodesFor(e.model, e.partName)
     if not nodes or #nodes == 0 then msg('Si detale neturi modelio (tik duomenys) - nera ka parodyti.', 6) return end
     preset.mode, preset.meshNodes = 'meshonly', nodes
-  elseif not e.frontEnd then
+  elseif not e.frontEnd and e.mode ~= 'engine' and e.mode ~= 'gearbox' then
     local reason = S.meshOnlyReason(e.model, e.partName)
     if reason then msg(S.meshOnlyMessage(reason, e.partName), 8) return end
   end
@@ -8047,17 +9539,22 @@ local function editExtra(target, index)
   if not ex then return end
   local preset = deepcopy(ex)
   if ex.meshOnly then preset.mode = 'meshonly' end
+  -- its sub parts as picked in the Parts menu: back on it when attached again
+  local alias = extraAlias(index)
+  preset.subTree = S.treeChildren(target, function(n) return n.chosenPartName == alias end)
   removeExtra(target, index)
   spawnGhost(ex.model, ex.part, target, preset)
 end
 
 -- a copy of an installed part as a new preview, right where the part is (same place, turn and
--- size); the part itself stays on the car
+-- size, the same Parts menu choices under it); the part itself stays on the car
 S.copyExtra = function(target, index)
   local ex = getExtras(target:getID())[index]
   if not ex then return end
   local preset = deepcopy(ex)
   preset.mode = ex.meshOnly and 'meshonly' or 'part'
+  local alias = extraAlias(index)
+  preset.subTree = S.treeChildren(target, function(n) return n.chosenPartName == alias end)
   if type(preset.frontEnd) == 'table' then preset.frontEnd.replaced = nil end
   spawnGhost(ex.model, ex.part, target, preset)
   msg('Kopija atsirado toje pacioje vietoje - pastumdyk ja ir PRITVIRTINK.', 5)
@@ -8073,12 +9570,15 @@ S.copyPreview = function(e)
     frontEnd = e.frontEnd,
     skin = e.skin,
     noLogic = e.noLogic,
+    engine2 = e.engine2,
     skip = e.skip,
     cut = e.cut,
+    subTree = e.subTree,
     move = {e.off[1][0], e.off[2][0], e.off[3][0]},
     rot = {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
     pivot = e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z} or nil,
     scale = S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
+    perAxis = e.perAxisPtr[0] or nil,
   }
   spawnGhost(e.model, e.partName, target, preset)
   msg('Kopija atsirado toje pacioje vietoje - pastumdyk ja ir PRITVIRTINK.', 5)
@@ -8099,6 +9599,8 @@ local function editGearboxSwap(target)
   if type(spec) ~= 'table' then return end
   local preset = deepcopy(spec)
   preset.mode = 'gearbox'
+  preset.subTree = S.treeChildren(target, function(n) return n.chosenPartName == gearboxAlias end)
+  preset.origTree = nil
   removeGearboxSwap(target)
   spawnGhost(spec.model, spec.part, target, preset)
 end
@@ -8201,7 +9703,7 @@ deleteEntry = function(e)
   entries[e.id] = nil
   if selectedEntryId == e.id then selectedEntryId = nil end
   local ghost = getVeh(e.id)
-  if ghost then ghost:delete() end
+  if ghost then S.deleteVeh(ghost) end
 end
 
 --------------------------------------------------------------------------------
@@ -8225,17 +9727,23 @@ local function loadModelList()
   local ok, res = pcall(core_vehicles.getModelList, true)
   if ok and res and res.models then
     for _, m in ipairs(res.models) do
-      if m.key then
-        local label = ((m.Brand and m.Brand ~= '') and (m.Brand .. ' ') or '') .. (m.Name or m.key)
-        table.insert(S.modelList, {key = m.key, label = label .. '  [' .. m.key .. ']', group = S.modelGroupOf(m)})
+      if type(m) == 'table' and m.key then
+        -- (a mod's info.json may give its brand or name as something else than text)
+        local brand = type(m.Brand) == 'string' and m.Brand or ''
+        local name = (type(m.Name) == 'string' or type(m.Name) == 'number') and tostring(m.Name) or tostring(m.key)
+        local label = (brand ~= '' and (brand .. ' ') or '') .. name
+        local okG, group = pcall(S.modelGroupOf, m)
+        table.insert(S.modelList, {key = m.key, label = label .. '  [' .. tostring(m.key) .. ']', group = okG and group or 'drive'})
       end
     end
   end
   table.sort(S.modelList, function(a, b) return a.label:lower() < b.label:lower() end)
 end
 
+-- (a label that is not text - a mod part's broken slot type - sorts as its text form: in v1.4.6 it
+-- stopped the part list half way, after the categories and before every swap folder)
 local function sortByLabel(list)
-  table.sort(list, function(a, b) return a.label:lower() < b.label:lower() end)
+  table.sort(list, function(a, b) return tostring(a.label):lower() < tostring(b.label):lower() end)
 end
 
 -- builds S.partList (flat, for search) and S.partCategories / S.otherCategories (folders by slot)
@@ -8288,11 +9796,37 @@ local function loadPartList(model)
   sortByLabel(S.partList)
   S.partEntries = partEntries
 
-  -- folders: slots this model offers on top (merged by readable name), the rest under "Kita"
+  -- folders: slots this model offers on top (merged by readable name), the rest under "Kita". A slot
+  -- type that is not text (a mod part's "slotType" written wrong, e.g. a list in a list) is left out
+  -- and named in the log with its parts, so the mod can be found
   local byLabel, byOther = {}, {}
+  local badTypes = {}
+  -- the parts are read with the game's own function (another mod's wrapper around it can't break
+  -- the list); each part on its own: one that fails is skipped and its mod named (S.notePartProblem)
+  local getPartSafe = origGetPart or jbeamIO.getPart
+  local function eachPart(what, name, fn)
+    local okP, part, file = pcall(getPartSafe, ioCtx, name)
+    if not okP then
+      S.notePartProblem(name, nil, part, what)
+      return
+    end
+    if type(part) ~= 'table' then return end
+    local okF, err = pcall(fn, part)
+    if not okF then S.notePartProblem(name, file, err, what) end
+  end
   for slotType, names in pairs(slotMap) do
     local folder
-    if slotType == 'main' then
+    if type(slotType) ~= 'string' then
+      local some = {}
+      for i = 1, math.min(5, type(names) == 'table' and #names or 0) do some[#some + 1] = tostring(names[i]) end
+      badTypes[#badTypes + 1] = string.format('%s (%s)', type(slotType), table.concat(some, ', '))
+      -- its mod, by the file of its first part
+      local first = type(names) == 'table' and names[1]
+      if first then
+        local okP, _, file = pcall(getPartSafe, ioCtx, first)
+        S.notePartProblem(first, okP and file or nil, 'its "slotType" is not text', 'part list')
+      end
+    elseif slotType == 'main' then
       folder = byLabel['Kebulas (main)'] or {label = 'Kebulas (main)', parts = {}}
       byLabel[folder.label] = folder
     elseif slotDesc[slotType] then
@@ -8303,9 +9837,18 @@ local function loadPartList(model)
       folder = byOther[slotType] or {label = slotType, parts = {}}
       byOther[slotType] = folder
     end
-    for _, name in ipairs(names) do
+    for _, name in ipairs(folder and type(names) == 'table' and names or {}) do
       if partEntries[name] then table.insert(folder.parts, partEntries[name]) end
     end
+  end
+  if #badTypes > 0 then
+    log('W', logTag, string.format('part list of %s: %d slot types are not text (a mod\'s part with a broken "slotType"), left out - its parts: %s',
+      tostring(model), #badTypes, table.concat(badTypes, '; ', 1, math.min(10, #badTypes))))
+  end
+  -- each swap folder on its own: one odd part a mod brought must not leave the others empty
+  local function guarded(what, fn)
+    local okB, errB = pcall(fn)
+    if not okB then log('E', logTag, string.format('part list of %s: the %s folder failed: %s', tostring(model), what, tostring(errB))) end
   end
   for _, f in pairs(byLabel) do
     if #f.parts > 0 then sortByLabel(f.parts) table.insert(S.partCategories, f) end
@@ -8316,58 +9859,65 @@ local function loadPartList(model)
   sortByLabel(S.partCategories)
   sortByLabel(S.otherCategories)
 
-  -- engine swap folder: real combustion engines that fit this model's engine slot
-  for slotType, names in pairs(slotMap) do
-    if slotDesc[slotType] and type(slotType) == 'string' and slotType:lower():find('engine', 1, true) then
-      for _, name in ipairs(names) do
-        local okPart, part = pcall(jbeamIO.getPart, ioCtx, name)
-        if okPart and isEnginePart(part) then
-          local info = engineInfo(part) or {}
-          local base = partEntries[name] and partEntries[name].label or name
-          local extra = (info.kw and info.kw > 0) and string.format('   ~%d kW', math.floor(info.kw + 0.5)) or ''
-          if info.maxRPM then extra = extra .. string.format(', %d rpm', math.floor(info.maxRPM)) end
-          if type(info.fuel) == 'string' then extra = extra .. ', ' .. info.fuel end
-          table.insert(S.engineList, {name = name, label = base .. extra})
+  -- engine swap folder: real combustion engines that fit this model's engine slot (one odd engine
+  -- part is skipped, not the whole folder)
+  guarded('engine swap', function()
+    for slotType, names in pairs(slotMap) do
+      if slotDesc[slotType] and type(slotType) == 'string' and slotType:lower():find('engine', 1, true) then
+        for _, name in ipairs(names) do
+          eachPart('engine swap', name, function(part)
+            if not isEnginePart(part) then return end
+            local info = engineInfo(part) or {}
+            local base = partEntries[name] and partEntries[name].label or name
+            local extra = (tonumber(info.kw) and info.kw > 0) and string.format('   ~%d kW', math.floor(info.kw + 0.5)) or ''
+            if tonumber(info.maxRPM) then extra = extra .. string.format(', %d rpm', math.floor(info.maxRPM)) end
+            if type(info.fuel) == 'string' then extra = extra .. ', ' .. info.fuel end
+            table.insert(S.engineList, {name = name, label = base .. extra})
+          end)
         end
       end
     end
-  end
+  end)
   sortByLabel(S.engineList)
 
   -- gearbox swap folder: parts with a gearbox device in the slots this model offers
-  for slotType, names in pairs(slotMap) do
-    if slotDesc[slotType] and type(slotType) == 'string' and isTransmissionSlot({name = slotType}) then
-      for _, name in ipairs(names) do
-        local okPart, part = pcall(jbeamIO.getPart, ioCtx, name)
-        if okPart and isGearboxPart(part) then
-          local kind = ''
-          for _, row in ipairs(part.powertrain) do
-            if type(row) == 'table' and type(row[1]) == 'string' and row[1]:find('Gearbox$') then kind = row[1]:gsub('Gearbox$', '') end
-          end
-          local base = partEntries[name] and partEntries[name].label or name
-          table.insert(S.gearboxList, {name = name, label = base .. '   [' .. kind .. ']'})
+  guarded('gearbox swap', function()
+    for slotType, names in pairs(slotMap) do
+      if slotDesc[slotType] and type(slotType) == 'string' and isTransmissionSlot({name = slotType}) then
+        for _, name in ipairs(names) do
+          eachPart('gearbox swap', name, function(part)
+            if not isGearboxPart(part) then return end
+            local kind = ''
+            for _, row in ipairs(part.powertrain) do
+              if type(row) == 'table' and type(row[1]) == 'string' and row[1]:find('Gearbox$') then kind = row[1]:gsub('Gearbox$', '') end
+            end
+            local base = partEntries[name] and partEntries[name].label or name
+            table.insert(S.gearboxList, {name = name, label = base .. '   [' .. kind .. ']'})
+          end)
         end
       end
     end
-  end
+  end)
   sortByLabel(S.gearboxList)
 
   -- suspension swap folders: front / rear by where the part's nodes sit; subframes too (a whole
   -- subframe with its suspension, hubs and what else it carries swaps in for the car's subframe)
-  for slotType, names in pairs(slotMap) do
-    if slotDesc[slotType] and type(slotType) == 'string' and (S.isSuspensionText(slotType) or S.isSubframeText(slotType)) then
-      for _, name in ipairs(names) do
-        local okPart, part = pcall(jbeamIO.getPart, ioCtx, name)
-        if okPart and isSuspensionPart(part, name, 'any') then
-          local kind = suspensionKind(part, name)
-          -- a subframe goes to its own folder (its swap is a kind of its own)
-          if isSuspensionPart(part, name, 'sub') and not isSuspensionPart(part, name) then kind = 'sub_' .. kind:sub(-1) end
-          local base = partEntries[name] and partEntries[name].label or name
-          table.insert(S.suspLists[kind], {name = name, label = base})
+  guarded('suspension swap', function()
+    for slotType, names in pairs(slotMap) do
+      if slotDesc[slotType] and type(slotType) == 'string' and (S.isSuspensionText(slotType) or S.isSubframeText(slotType)) then
+        for _, name in ipairs(names) do
+          eachPart('suspension swap', name, function(part)
+            if not isSuspensionPart(part, name, 'any') then return end
+            local kind = suspensionKind(part, name)
+            -- a subframe goes to its own folder (its swap is a kind of its own)
+            if isSuspensionPart(part, name, 'sub') and not isSuspensionPart(part, name) then kind = 'sub_' .. kind:sub(-1) end
+            local base = partEntries[name] and partEntries[name].label or name
+            if S.suspLists[kind] then table.insert(S.suspLists[kind], {name = name, label = base}) end
+          end)
         end
       end
     end
-  end
+  end)
   sortByLabel(S.suspLists.susp_F)
   sortByLabel(S.suspLists.susp_R)
   sortByLabel(S.suspLists.sub_F)
@@ -8377,23 +9927,184 @@ local function loadPartList(model)
   S.fiList = {}
   -- radiator folder: parts with cooling data (radiator area / effectiveness)
   S.radiatorList = {}
-  for name, p in pairs(partEntries) do
-    local okPart, part = pcall(jbeamIO.getPart, ioCtx, name)
-    if okPart and type(part) == 'table' and (type(part.turbocharger) == 'table' or type(part.supercharger) == 'table') then
-      local kind = (type(part.turbocharger) == 'table' and type(part.supercharger) == 'table') and 'turbo + supercharger'
-        or type(part.turbocharger) == 'table' and 'turbo' or 'supercharger'
-      table.insert(S.fiList, {name = name, label = p.label .. '   [' .. kind .. ']'})
+  guarded('turbo / radiator', function()
+    for name, p in pairs(partEntries) do
+      eachPart('turbo / radiator', name, function(part)
+        if type(part.turbocharger) == 'table' or type(part.supercharger) == 'table' then
+          local kind = (type(part.turbocharger) == 'table' and type(part.supercharger) == 'table') and 'turbo + supercharger'
+            or type(part.turbocharger) == 'table' and 'turbo' or 'supercharger'
+          table.insert(S.fiList, {name = name, label = p.label .. '   [' .. kind .. ']'})
+        end
+        local data = S.radiatorData(part)
+        if type(data) == 'table' then
+          local info = string.format('   [plotas %s, efekt. %s%s]', tostring(data.radiatorArea or '-'), tostring(data.radiatorEffectiveness or '-'),
+            data.radiatorFanType and (', ' .. tostring(data.radiatorFanType)) or '')
+          table.insert(S.radiatorList, {name = name, label = p.label .. info})
+        end
+      end)
     end
-    local data = okPart and S.radiatorData(part)
-    if data then
-      local info = string.format('   [plotas %s, efekt. %s%s]', tostring(data.radiatorArea or '-'), tostring(data.radiatorEffectiveness or '-'),
-        data.radiatorFanType and (', ' .. tostring(data.radiatorFanType)) or '')
-      table.insert(S.radiatorList, {name = name, label = p.label .. info})
-    end
-  end
+  end)
   sortByLabel(S.radiatorList)
   sortByLabel(S.fiList)
   S.startClassify(model)
+end
+
+--------------------------------------------------------------------------------
+-- the search in all cars ("Visose masinose"): every car's parts - mods' too - in one list, with
+-- their Parts menu names and their car. Read straight from the cars' jbeam files a few ms a frame
+-- (S.idxStep) and kept on disk (S.idxFile): the next game reads again only the files that changed
+-- (size / time). A part of /vehicles/common/ is listed once, as a common part. Static props are
+-- left out, so are parts with nothing to put on a car (no points, models, props, devices or slots).
+--------------------------------------------------------------------------------
+S.idxFile = '/settings/partAttacher/partindex.json'
+-- a part is {name, menu name, slot type, 's' for a turning steering wheel}; a saved list of
+-- another version is read again
+S.idxVersion = 2
+S.allCarsPtr = im.BoolPtr(false)
+
+-- a part's menu name: a text, or a translation key with its values ({txt, ctx}) as the game reads it
+S.idxName = function(n)
+  if type(n) == 'string' then return n end
+  if type(n) ~= 'table' or type(n.txt) ~= 'string' then return '' end
+  local ok, r = pcall(function()
+    local loc = extensions.core_locales
+    if n.ctx and loc and loc.contextTranslate then return loc.contextTranslate(n.txt, n.ctx) end
+    return _tr and _tr(n.txt) or n.txt
+  end)
+  return ok and type(r) == 'string' and r or n.txt
+end
+
+-- a turning steering wheel model (a "steering" prop): the interior swap's wheels need one
+S.idxHasSteering = function(part)
+  local pr = part.props
+  if type(pr) ~= 'table' or type(pr[1]) ~= 'table' then return false end
+  local fc
+  for i, h in ipairs(pr[1]) do if h == 'func' then fc = i end end
+  for i = 2, fc and #pr or 0 do
+    if type(pr[i]) == 'table' and pr[i][fc] == 'steering' then return true end
+  end
+  return false
+end
+
+S.idxUseful = function(part)
+  for _, k in ipairs({'nodes', 'flexbodies', 'props', 'powertrain', 'energyStorage', 'controller', 'slots', 'slots2'}) do
+    if type(part[k]) == 'table' and #part[k] > 1 then return true end
+  end
+  return false
+end
+
+-- a file's size and time: read again when they change
+S.idxStamp = function(file)
+  local ok, st = pcall(function() return FS:stat(file) end)
+  if ok and type(st) == 'table' then return tostring(st.filesize) .. ':' .. tostring(st.modtime) end
+  return '?'
+end
+
+S.idxStart = function()
+  if S.idx then return end
+  if not S.modelList then loadModelList() end
+  local saved
+  pcall(function() saved = jsonReadFile(S.idxFile) end)
+  local dirs, labels = {{dir = '/vehicles/common/', model = 'common'}}, {}
+  for _, m in ipairs(S.modelList or {}) do
+    if m.group ~= 'static' then
+      dirs[#dirs + 1] = {dir = '/vehicles/' .. m.key .. '/', model = m.key}
+      labels[m.key] = m.label
+    end
+  end
+  S.idx = {dirs = dirs, d = 0, labels = labels, queue = {}, q = 0, files = {},
+    old = type(saved) == 'table' and saved.v == S.idxVersion and type(saved.files) == 'table' and saved.files or {}}
+end
+
+-- every frame (onUpdate) while the list is not done: first the cars' file lists (a file read before
+-- and not changed comes from the saved list), then the new and changed files, then the list
+S.idxStep = function(budget)
+  local x = S.idx
+  if not x or x.done then return end
+  local t0 = os.clock()
+  while x.d < #x.dirs and os.clock() - t0 < budget do
+    x.d = x.d + 1
+    local d = x.dirs[x.d]
+    local okF, files = pcall(function() return FS:findFiles(d.dir, '*.jbeam', -1, false, false) end)
+    for _, f in ipairs(okF and type(files) == 'table' and files or {}) do
+      local st = S.idxStamp(f)
+      local o = x.old[f]
+      if type(o) == 'table' and o.st == st and o.m == d.model and type(o.p) == 'table' then
+        x.files[f] = o
+      else
+        x.queue[#x.queue + 1] = {f = f, m = d.model, st = st}
+      end
+    end
+  end
+  if x.d < #x.dirs then return end
+  while x.q < #x.queue and os.clock() - t0 < budget do
+    x.q = x.q + 1
+    local job = x.queue[x.q]
+    local okR, data = pcall(jsonReadFile, job.f)
+    local list = {}
+    for name, part in pairs(okR and type(data) == 'table' and data or {}) do
+      if type(name) == 'string' and type(part) == 'table' and (type(part.slotType) == 'string' or type(part.slotType) == 'table')
+        and S.idxUseful(part) then
+        local info = type(part.information) == 'table' and part.information or {}
+        local slot = type(part.slotType) == 'string' and part.slotType or tostring(part.slotType[1] or '')
+        list[#list + 1] = {name, S.idxName(info.name), slot, S.idxHasSteering(part) and 's' or ''}
+      end
+    end
+    x.files[job.f] = {st = job.st, m = job.m, p = list}
+    x.dirty = true
+  end
+  if x.q < #x.queue then return end
+  -- the list to search: "Rear Diffuser (etk800_diffuser_R)", its car, its slot type
+  local out, cars = {}, {}
+  for _, e in pairs(x.files) do
+    for _, p in ipairs(type(e.p) == 'table' and e.p or {}) do
+      if type(p[1]) == 'string' then
+        local d = type(p[2]) == 'string' and p[2] or ''
+        local label = (d ~= '' and d ~= p[1]) and (d .. '  (' .. p[1] .. ')') or p[1]
+        local car = x.labels[e.m] or tostring(e.m)
+        out[#out + 1] = {name = p[1], model = e.m, label = label, slot = tostring(p[3] or ''), steer = p[4] == 's',
+          lower = (label .. ' ' .. car .. ' ' .. tostring(p[3] or '')):lower()}
+        cars[e.m] = true
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a.lower < b.lower end)
+  x.list, x.cars, x.done = out, tableSize(cars), true
+  if x.dirty then
+    pcall(function()
+      if not FS:directoryExists('/settings/partAttacher/') then FS:directoryCreate('/settings/partAttacher/', true) end
+      jsonWriteFile(S.idxFile, {v = S.idxVersion, files = x.files}, false)
+    end)
+  end
+  log('I', logTag, string.format('search in all cars: %d parts of %d cars (%d files read, %d from the saved list)',
+    #out, x.cars, #x.queue, tableSize(x.files) - #x.queue))
+  x.old, x.queue = nil, {}
+end
+
+-- how far the list is read, in percent (the file lists a tenth, the files the rest)
+S.idxProgress = function()
+  local x = S.idx
+  if not x or x.done then return 100 end
+  local pct = x.d < #x.dirs and 10 * x.d / math.max(1, #x.dirs) or 10 + 90 * x.q / math.max(1, #x.queue)
+  return math.floor(pct)
+end
+
+-- the parts whose name, car or slot has every word of the search (kept while the search stays)
+S.idxSearch = function(s)
+  local x = S.idx
+  if x.hitsFor == s then return x.hits end
+  local words = {}
+  for w in s:gmatch('%S+') do words[#words + 1] = w end
+  local hits = {}
+  for _, p in ipairs(x.list) do
+    local ok = true
+    for _, w in ipairs(words) do
+      if not p.lower:find(w, 1, true) then ok = false break end
+    end
+    if ok then hits[#hits + 1] = p end
+  end
+  x.hitsFor, x.hits = s, hits
+  return hits
 end
 
 --------------------------------------------------------------------------------
@@ -8705,7 +10416,7 @@ S.hoverDeleteGhost = function()
   if not g then return end
   if g.view then pcall(function() RenderViewManagerInstance:destroyView(g.view) end) end
   local veh = getVeh(g.vid)
-  if veh then veh:delete() end
+  if veh then S.deleteVeh(veh) end
   -- its live picture goes with it
   if h.show and h.show.live then h.show = nil end
 end
@@ -8807,7 +10518,7 @@ S.batchDropGhost = function(b)
   if not g then return end
   if g.view then pcall(function() RenderViewManagerInstance:destroyView(g.view) end) end
   local veh = getVeh(g.vid)
-  if veh then veh:delete() end
+  if veh then S.deleteVeh(veh) end
 end
 
 S.batchSpawn = function(b, c)
@@ -9019,27 +10730,32 @@ S.slotsOf = function(partName)
   if not (S.partIoCtx and type(partName) == 'string') then return {} end
   local cached = S.slotCache[partName]
   if cached then return cached end
-  local okPart, part = pcall(jbeamIO.getPart, S.partIoCtx, partName)
+  -- (the game's own function: another mod's wrapper around it can't break the tree; a slot this mod
+  -- can't read is skipped and its part's mod named - S.notePartProblem)
+  local okPart, part, file = pcall(origGetPart or jbeamIO.getPart, S.partIoCtx, partName)
   local list = {}
-  for _, s in ipairs(okPart and type(part) == 'table' and (part.slots2 or part.slots) or {}) do
+  for _, s in ipairs(okPart and type(part) == 'table' and type(part.slots2 or part.slots) == 'table' and (part.slots2 or part.slots) or {}) do
     if type(s) == 'table' and type(s.name) == 'string' then
-      local deny = {}
-      for _, t in ipairs(type(s.denyTypes) == 'table' and s.denyTypes or {}) do deny[t] = true end
-      local options, seen = {}, {}
-      for _, t in ipairs(type(s.allowTypes) == 'table' and s.allowTypes or {s.type or s.name}) do
-        if not deny[t] then
-          for _, n in ipairs(S.partSlotMap[t] or {}) do
-            if not seen[n] then
-              seen[n] = true
-              options[#options + 1] = n
+      local okS, errS = pcall(function()
+        local deny = {}
+        for _, t in ipairs(type(s.denyTypes) == 'table' and s.denyTypes or {}) do deny[t] = true end
+        local options, seen = {}, {}
+        for _, t in ipairs(type(s.allowTypes) == 'table' and s.allowTypes or {s.type or s.name}) do
+          if not deny[t] then
+            for _, n in ipairs(type(S.partSlotMap[t]) == 'table' and S.partSlotMap[t] or {}) do
+              if not seen[n] then
+                seen[n] = true
+                options[#options + 1] = n
+              end
             end
           end
         end
-      end
-      local function label(n) return (S.partEntries[n] and S.partEntries[n].label or n):lower() end
-      table.sort(options, function(a, b) return label(a) < label(b) end)
-      local desc = type(s.description) == 'string' and s.description ~= '' and s.description or s.name
-      list[#list + 1] = {name = s.name, desc = desc, default = s.default, options = options}
+        local function label(n) return tostring(S.partEntries[n] and S.partEntries[n].label or n):lower() end
+        table.sort(options, function(a, b) return label(a) < label(b) end)
+        local desc = type(s.description) == 'string' and s.description ~= '' and s.description or s.name
+        list[#list + 1] = {name = s.name, desc = desc, default = type(s.default) == 'string' and s.default or nil, options = options}
+      end)
+      if not okS then S.notePartProblem(partName, file, errS, 'slot tree') end
     end
   end
   S.slotCache[partName] = list
@@ -9085,11 +10801,49 @@ end
 local function selectModel(model)
   if model and model ~= S.selectedModel then
     S.selectedModel = model
-    loadPartList(model)
+    -- (what it built so far stays; the window says what went wrong - S.drawModProblems)
+    local okL, errL = pcall(loadPartList, model)
+    if not okL then
+      log('E', logTag, 'part list of ' .. tostring(model) .. ' failed: ' .. tostring(errL))
+      S.windowErr = {text = tostring(errL), at = os.clock()}
+    end
     -- its part pictures only when "take part pictures" is ticked (S.batchStart checks)
     local okB, errB = pcall(S.batchStart, model)
     if not okB then log('E', logTag, 'part pictures: ' .. tostring(errB)) end
   end
+end
+
+-- a part found in all cars: its car becomes the picked model (a common part stays on the picked
+-- one, any car has it) and the part is picked, as if picked in that car's list
+S.pickFromAll = function(p, player)
+  local model = p.model
+  if model == 'common' then model = S.selectedModel or (player and player.jbeam) end
+  if not model then return end
+  selectModel(model)
+  S.selectedPartName, S.selectedIsEngine = p.name, false
+end
+
+-- the list of the search in all cars: while it is read its progress, then the parts found with
+-- their car (names as the cars have them: not run through the window's translation)
+S.drawAllCarsSearch = function(s, player)
+  S.idxStart()
+  local x = S.idx
+  if not x.done then
+    imText(string.format('Renkamos visu masinu detales... %d%%', S.idxProgress()))
+    return
+  end
+  local hits = S.idxSearch(s)
+  for i = 1, math.min(#hits, maxListedParts) do
+    local p = hits[i]
+    local car = p.model == 'common' and L('bendra detale') or x.labels[p.model] or tostring(p.model)
+    local here = p.model == 'common' or p.model == S.selectedModel
+    if ui_imgui.Selectable1(p.label .. '   -   ' .. car .. '##allcars' .. i, here and p.name == S.selectedPartName and not S.selectedIsEngine) then
+      S.pickFromAll(p, player)
+    end
+    if here then S.partHover(p.name) end
+  end
+  if #hits == 0 then imText('Nieko nerasta.') end
+  if #hits > maxListedParts then imText(string.format('... ir dar %d', #hits - maxListedParts)) end
 end
 
 --------------------------------------------------------------------------------
@@ -9155,8 +10909,18 @@ local function drawSpawnSection(player)
 
   im.InputText('Ieskoti detales', S.partSearchPtr, 128)
   local s = ffi.string(S.partSearchPtr):lower()
+  -- ticking it starts reading the list (S.idxStep), so it is ready by the time the words are typed
+  if im.Checkbox('Visose masinose', S.allCarsPtr) and S.allCarsPtr[0] then S.idxStart() end
+  if im.IsItemHovered() then im.SetTooltip('Ieskok detales visose masinose (ir modu), ne tik sioje: pvz. "diffuser" ar "rear seat" (turi buti visi zodziai). Paspaudus detale pasirenkama jos masina ir ji pati. Pirma karta sarasas sudaromas truputi ilgiau, po to issaugomas.') end
+  if S.allCarsPtr[0] and S.idx then
+    im.SameLine()
+    im.TextColored(im.ImVec4(0.6, 0.6, 0.6, 1), S.idx.done and string.format('(%d detales is %d masinu)', #S.idx.list, S.idx.cars or 0)
+      or string.format('Renkamos visu masinu detales... %d%%', S.idxProgress()))
+  end
   if im.BeginChild1('##partlist', im.ImVec2(0, S.px(340)), true) then
-    if s ~= '' then
+    if s ~= '' and S.allCarsPtr[0] then
+      S.drawAllCarsSearch(s, player)
+    elseif s ~= '' then
       -- search: flat list
       local shown, total = 0, 0
       for _, p in ipairs(S.partList or {}) do
@@ -9239,6 +11003,13 @@ local function drawSpawnSection(player)
     or ('Sukurti detale: ' .. (S.selectedPartName or '-'))
   -- the main button of the tab; for a suspension it is the real geometry swap
   if S.primaryButton(label, im.ImVec2(-1, 0)) then spawnSelectedPart() end
+  -- an engine of the list: also as a second engine, next to the car's own
+  if S.selectedIsEngine == true then
+    if im.Button('PRIDETI KAIP ANTRA VARIKLI: ' .. tostring(S.selectedPartName), im.ImVec2(-1, 0)) and player then
+      S.spawnEngine2Ghost(S.selectedModel, S.selectedPartName, player)
+    end
+    if im.IsItemHovered() then im.SetTooltip('Tavo variklis lieka, sis atsiranda salia kaip antras: su fizika ir modeliu, o jo sukimo momentas (su jo ECU, intake, internals) prisideda prie tavo variklio - abu ant vieno veleno. Parts meniu jis matosi su savo slotais. Jo turbo / kompresorius atskirai neveikia.') end
+  end
   if swapKinds[S.selectedIsEngine] and swapKinds[S.selectedIsEngine].subframe then
     if im.IsItemHovered() then im.SetTooltip('Visas donoro subframe su viskuo, kas ant jo (pakaba, stebules, ratai), vietoj tavo subframe. Donoro variklis (vidurinio variklio masinos) nededamas - naujus ratus suka tavo variklis per universalias pavaras. Po to i ji dar galima swapinti kitos masinos pakaba.') end
   elseif swapKinds[S.selectedIsEngine] then
@@ -9396,6 +11167,9 @@ local function drawGhostSection()
     im.SameLine()
     if im.SmallButton('Tik modelis##ghostmode') then S.respawnGhost(e, true) return end
   end
+  if e.engine2 and e.mode == 'part' then
+    im.TextColored(im.ImVec4(1.0, 0.72, 0.25, 1.0), 'ANTRAS VARIKLIS: jo sukimo momentas prisides prie tavo variklio.')
+  end
 
   local holdPtr = im.BoolPtr(e.hold)
   if im.Checkbox('Laikyti ore', holdPtr) then e.hold = holdPtr[0] end
@@ -9416,12 +11190,15 @@ local function drawGhostSection()
   sliderRow('Pasvirimas (X)', e.rot[1], 5, -180, 180, '%.1f deg')
   sliderRow('Pokrypis (Y)', e.rot[2], 5, -180, 180, '%.1f deg')
   sliderRow('Pasukimas (Z)', e.rot[3], 5, -180, 180, '%.1f deg')
-  if e.mode == 'part' or e.mode == 'meshonly' or e.mode == 'partswap' then
+  if e.mode == 'part' or e.mode == 'meshonly' or e.mode == 'partswap' or e.mode == 'engine' or e.mode == 'gearbox' then
     -- size: one factor for all axes, or one per axis (width X, length Y, height Z); the preview is
     -- built again at the new size once a slider / field is let go. A suspension (part swap) grows
-    -- without its wheels (S.scaleSwapTree)
+    -- without its wheels (S.scaleSwapTree); a swapped engine only in its model (its physics stay the
+    -- car's block), a swapped gearbox in its model and physics
     local isSusp = e.mode == 'partswap'
     if isSusp then imText('Pakabos dydis: ratai lieka savo dydzio, didinama tik pakaba.') end
+    if e.mode == 'engine' then imText('Variklio dydis: didinamas tik modelis, fizika lieka tavo variklio.') end
+    if e.mode == 'gearbox' then imText('Pavaru dezes dydis: modelis ir fizika.') end
     local apply = false
     if im.Checkbox('Dydis atskirai X / Y / Z', e.perAxisPtr) then
       if e.perAxisPtr[0] then
@@ -9443,6 +11220,7 @@ local function drawGhostSection()
       if S.scaleRow('Dydis (scale)', e.scale) then apply = true end
       if im.IsItemHovered() then
         im.SetTooltip(isSusp and 'Pakaba (svirtys, amortizatoriai, stebules) padideja / sumazeja apie savo centra, ratai ir stabdziai lieka tokio pat dydzio ir tik pasislenka kartu su stebulemis. Atleidus slankikli perziura persikrauna.'
+          or e.mode == 'engine' and 'Variklio modelis padideja / sumazeja apie savo centra kartu su skriemuliais ir tiuningo detalemis (kompresorius, intake). Atleidus slankikli perziura persikrauna.'
           or 'Detale padideja / sumazeja apie savo centra (modelis ir fizika). Atleidus slankikli perziura persikrauna.')
       end
     end
@@ -9457,6 +11235,18 @@ local function drawGhostSection()
     e.scale[0] = math.min(10, math.max(0.05, e.scale[0]))
     for i = 1, 3 do e.scaleAxis[i][0] = math.min(10, math.max(0.05, e.scaleAxis[i][0])) end
     local want = e.perAxisPtr[0] and {e.scaleAxis[1][0], e.scaleAxis[2][0], e.scaleAxis[3][0]} or {e.scale[0], e.scale[0], e.scale[0]}
+    if e.mode == 'engine' or e.engine2 then
+      -- power by size: the torque / kW go with the engine's volume (S.enginePowerFactor), on ATTACH
+      e.scalePowerPtr = e.scalePowerPtr or im.BoolPtr(e.scalePower ~= false)
+      im.Checkbox('Galia (kW / Nm) pagal dydi', e.scalePowerPtr)
+      if im.IsItemHovered() then
+        im.SetTooltip('Didesnis variklis - didesnis turis: sukimo momentas ir galia keiciasi kartu su variklio turiu (plotis x ilgis x aukstis, pvz. x1.30 = x2.20). Turbo ir kompresorius didina kartu, N2O lieka toks pat. Isjungus - galia lieka donoro.')
+      end
+      if e.scalePowerPtr[0] then
+        im.SameLine()
+        imText(string.format('kW / Nm x%.2f', S.enginePowerFactor({scale = want, scalePower = true})))
+      end
+    end
     if apply and (math.abs(want[1] - b[1]) > 1e-3 or math.abs(want[2] - b[2]) > 1e-3 or math.abs(want[3] - b[3]) > 1e-3) then
       S.rescaleGhost(e)
       return
@@ -9497,7 +11287,8 @@ local function drawGhostSection()
     if im.Button('Veidrodine kopija') then
       local target = getVeh(e.targetId)
       S.spawnMirror(target, e.model, e.partName, {e.off[1][0], e.off[2][0], e.off[3][0]}, {e.rot[1][0], e.rot[2][0], e.rot[3][0]},
-        e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z}, e.mode == 'meshonly', S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]))
+        e.pivot and {e.pivot.x, e.pivot.y, e.pivot.z}, e.mode == 'meshonly', S.scaleValue(e.builtScale[1], e.builtScale[2], e.builtScale[3]),
+        not e.frontEnd and e.cut or nil, e.perAxisPtr[0])
     end
     if im.IsItemHovered() then im.SetTooltip('Atsiras tokia pati detale kitoje masinos puseje (kaire <-> desine), veidrodiskai.') end
     im.SameLine()
@@ -9571,6 +11362,9 @@ local function drawInstalledSection(player)
   local swap = getSwap(player:getID())
   if swap then
     imText(string.format('Variklis: %s (is %s), vietoj %s', tostring(swap.part), tostring(swap.model), tostring(swap.replaces)))
+    if swap.scale ~= nil then im.SameLine() imText(S.scaleLabel(swap.scale)) end
+    local powerK = S.enginePowerFactor(swap)
+    if math.abs(powerK - 1) > 1e-3 then im.SameLine() imText(string.format('kW / Nm x%.2f', powerK)) end
     im.SameLine()
     if im.SmallButton('Perkelti##swap') then editSwap(player) end
     if im.IsItemHovered() then im.SetTooltip('Grazina sena varikli ir vel leidzia nauja stumdyti') end
@@ -9585,6 +11379,7 @@ local function drawInstalledSection(player)
   local gbSwap = getPA(player:getID()).gearboxSwap
   if type(gbSwap) == 'table' then
     imText(string.format('Pavaru deze: %s (is %s), vietoj %s', tostring(gbSwap.part), tostring(gbSwap.model), tostring(gbSwap.replaces)))
+    if gbSwap.scale ~= nil then im.SameLine() imText(S.scaleLabel(gbSwap.scale)) end
     im.SameLine()
     if im.SmallButton('Perkelti##gbswap') then editGearboxSwap(player) end
     im.SameLine()
@@ -9643,7 +11438,7 @@ local function drawInstalledSection(player)
       imText(string.format(ex.frontEnd.body and '%d. KEBULAS is %s (%d detales)' or '%d. PRIEKIS is %s (%d detales)', i, tostring(ex.model), #(ex.frontEnd.parts or {})))
     else
       imText(string.format('%d. %s  (is %s)%s', i, tostring(ex.part), tostring(ex.model), ex.meshOnly and '  [tik modelis]' or ex.dataOnly and '  [tik duomenys]'
-        or ex.noLogic and '  [be logikos]' or ''))
+        or ex.engine2 and '  [antras variklis]' or ex.noLogic and '  [be logikos]' or ''))
     end
     if ex.dataOnly then
       -- nothing to move, mirror or give physics: it can only come off
@@ -9678,7 +11473,7 @@ local function drawInstalledSection(player)
     end
     if not ex.dataOnly and not isFront then
       im.SameLine()
-      if im.SmallButton('Veidrodis') then S.spawnMirror(player, ex.model, ex.part, ex.move, ex.rot, ex.pivot, ex.meshOnly, ex.scale) end
+      if im.SmallButton('Veidrodis') then S.spawnMirror(player, ex.model, ex.part, ex.move, ex.rot, ex.pivot, ex.meshOnly, ex.scale, ex.cut, ex.perAxis) end
       if im.IsItemHovered() then im.SetTooltip('Tokia pati detale kitoje puseje: atsiras perziura, pastumdyk ir PRITVIRTINK.') end
       im.SameLine()
       if ex.meshOnly then
@@ -10072,6 +11867,8 @@ local function drawDrivetrainSection(player)
   end
   S.drawEvSection(player)
   S.drawJetSection(player)
+  S.drawIndestructibleSection(player)
+  S.drawExhaustSection(player)
 end
 
 -- the jet car (S.applyJet): the attached rocket on the throttle, its fuel; on or off
@@ -10099,6 +11896,509 @@ S.drawJetSection = function(player)
     elseif r then
       imText('Ant masinos nera raketos: uzdek ja 1 dalyje mygtuku "Raketa (JATO)", tada spausk IJUNGTI / ATNAUJINTI.')
     end
+  end
+end
+
+-- an indestructible engine (config indestructibleEngine): the vehicle side guards the engine
+-- devices (partAttacherEngineGuard); its block's own beams - the part its torque reaction nodes
+-- belong to - never bend or break, and no trigger beam can switch it off. Returns a log line.
+S.hardenEngine = function(vehicle)
+  vehicle.upaIndestructibleEngine = true
+  local names = {}
+  for _, d in pairs(type(vehicle.powertrain) == 'table' and vehicle.powertrain or {}) do
+    if type(d) == 'table' and (d.type == 'combustionEngine' or d.type == 'electricMotor') and type(d.name) == 'string' then names[#names + 1] = d.name end
+  end
+  local origins = {}
+  for _, name in ipairs(names) do
+    local data = vehicle[name]
+    if type(data) == 'table' then
+      data.breakTriggerBeam = nil
+      for _, cid in pairs(type(data.torqueReactionNodes_nodes) == 'table' and data.torqueReactionNodes_nodes or {}) do
+        local n = vehicle.nodes[cid]
+        if n and n.partOrigin then origins[n.partOrigin] = true end
+      end
+    end
+  end
+  local blockNodes = {}
+  for cid, n in pairs(vehicle.nodes or {}) do
+    if type(n) == 'table' and origins[n.partOrigin] then blockNodes[n.cid or cid] = true end
+  end
+  local hard = 0
+  for _, b in pairs(vehicle.beams or {}) do
+    if type(b) == 'table' and blockNodes[b.id1] and blockNodes[b.id2] then
+      b.beamStrength, b.beamDeform = math.huge, math.huge
+      b.breakGroup, b.deformGroup = nil, nil
+      hard = hard + 1
+    end
+  end
+  local list = {}
+  for o, _ in pairs(origins) do list[#list + 1] = o end
+  table.sort(list)
+  return string.format('%s - damage off; %d beams of its block (%s) never bend or break', #names > 0 and table.concat(names, ', ') or 'no engine',
+    hard, #list > 0 and table.concat(list, ', ') or '-')
+end
+
+-- section 4: the indestructible engine, the unkillable clutch and the extreme radiator (config
+-- indestructibleEngine / unkillableClutch / extremeRadiator: S.hardenEngine + the vehicle side's
+-- partAttacherEngineGuard), switched on together with one button
+S.durableKeys = {
+  {key = 'indestructibleEngine', label = 'Variklis niekada nesugenda',
+    tip = 'Variklis nebesugenda: nuo per dideliu apsuku, per didelio sukimo momento, vandens, perkaitimo (tarpine, ziedai, guoliai, issilydes blokas), alyvos trukumo ir smugio. Jo blokas nebesilanksto ir nelusta. Be kuro jis vis tiek sustoja. Veikia ir elektros varikliui.'},
+  {key = 'unkillableClutch', label = 'Sankaba niekada neslysta ir nesudega',
+    tip = 'Sankaba atlaiko tris kartus didesni sukimo momenta nei stipriausias variklis gali duoti, niekada neikaista, nesidevi ir nesugenda. Paspaudus sankabos pedala ji vis tiek atsijungia. Automato hidrotransformatorius slysta kaip iprastai (taip automatas pajuda is vietos).'},
+  {key = 'extremeRadiator', label = 'Ekstremalus radiatorius - niekada neperkaista',
+    tip = 'Variklio skystis, alyva, blokas ir cilindrai niekada neikaista daugiau nei sveikas silto variklio darbas - kad ir kokia apkrova, sugadintas radiatorius ar istekejes skystis.'},
+}
+S.drawIndestructibleSection = function(player)
+  local id = player:getID()
+  local pa = getPA(id)
+  if S.durableFor ~= id or not S.durablePtr then
+    S.durableFor, S.durablePtr = id, {}
+    for _, d in ipairs(S.durableKeys) do S.durablePtr[d.key] = im.BoolPtr(pa[d.key] == true) end
+  end
+  ui_imgui.SeparatorText(L('Nesunaikinamas variklis'))
+  local changed = false
+  for _, d in ipairs(S.durableKeys) do
+    im.Checkbox(d.label .. '##durable_' .. d.key, S.durablePtr[d.key])
+    if im.IsItemHovered() then im.SetTooltip(d.tip) end
+    if S.durablePtr[d.key][0] ~= (pa[d.key] == true) then changed = true end
+  end
+  if changed then
+    if S.primaryButton('PRITAIKYTI##durable', im.ImVec2(S.px(200), 0)) then
+      if respawnWithConfig(player, function(cfg)
+        for _, d in ipairs(S.durableKeys) do cfg.partAttacher[d.key] = S.durablePtr[d.key][0] or nil end
+      end) then
+        msg('Variklio, sankabos ir radiatoriaus apsauga pritaikyta.', 5)
+      end
+    end
+    im.SameLine()
+    imText('Pakeista - spausk PRITAIKYTI (masina persikraus).')
+  end
+end
+
+-- what the loaded car weighs (its points' masses: without fuel and cargo) and what brings it: the
+-- car's own parts, each added part, each swap (its parts, wheels and frame points), the mod's helper
+-- points; how much the stability fix added (stabilizeNodes); the lightest it can get (S.massFloors).
+-- Kept with the vehicle data.
+S.weightInfo = function(player)
+  local id = player:getID()
+  local vd = getVData(id)
+  if not (vd and type(vd.nodes) == 'table') then return nil end
+  if S.weightCache and S.weightCache.vd == vd then return S.weightCache.res end
+  local defaultMass = tonumber(type(vd.options) == 'table' and vd.options.nodeWeight) or 25
+  local extras = getExtras(id)
+  local groups, own, total = {}, {}, 0
+  local kinds = {}
+  for kind, _ in pairs(swapKinds) do kinds[#kinds + 1] = kind end
+  local function add(key, label, m, order)
+    local g = groups[key]
+    if not g then
+      g = {key = key, label = label, kg = 0, order = order}
+      groups[key] = g
+    end
+    g.kg = g.kg + m
+  end
+  for _, n in pairs(vd.nodes) do
+    if type(n) == 'table' then
+      local m = tonumber(n.nodeWeight) or defaultMass
+      total = total + m
+      local name, po = tostring(n.name or ''), tostring(n.partOrigin or '')
+      local i = tonumber(name:match('^upa(%d+)_'))
+      local swapKind = po:match('^upa_swap_(.+)$')
+      if not swapKind then
+        for _, kind in ipairs(kinds) do
+          if name:sub(1, #kind + 4) == 'ups' .. kind .. '_' then swapKind = kind end
+        end
+      end
+      if i then
+        local ex = extras[i]
+        add('extra' .. i, L(string.format('Prideta detale %d: %s', i, type(ex) == 'table' and tostring(ex.part) or '?')), m, 3)
+      elseif swapKind and swapKinds[swapKind] then
+        add('swap' .. swapKind, L(swapKinds[swapKind].label) .. ' (swap)', m, 2)
+      elseif name:find('^upse_') or po == swapAlias then
+        add('engine', 'Variklio swap', m, 2)
+      elseif po == gearboxAlias then
+        add('gearbox', 'Pavaru dezes swap', m, 2)
+      elseif name:find('^upa') or name:find('^ups') then
+        add('helper', 'Modo pagalbiniai taskai', m, 4)
+      else
+        add('own', 'Tavo masinos detales', m, 1)
+        own[po] = (own[po] or 0) + m
+      end
+    end
+  end
+  local list = {}
+  for _, g in pairs(groups) do list[#list + 1] = g end
+  table.sort(list, function(a, b)
+    if a.order ~= b.order then return a.order < b.order end
+    return a.kg > b.kg
+  end)
+  local ownList = {}
+  for po, kg in pairs(own) do ownList[#ownList + 1] = {part = po, kg = kg} end
+  table.sort(ownList, function(a, b) return a.kg > b.kg end)
+  local floors, fixed, now = S.massFloors(vd.nodes, vd.beams, defaultMass, vd)
+  local plan = S.massPlan(floors, fixed, now, 0)
+  local info = type(vd.upaWeightInfo) == 'table' and vd.upaWeightInfo or nil
+  local res = {total = total, groups = list, own = ownList, stab = tonumber(vd.upaStabMass) or 0,
+    natural = info and tonumber(info.natural) or total, min = plan.min, target = info and tonumber(info.target) or nil}
+  S.weightCache = {vd = vd, res = res}
+  return res
+end
+
+-- section 3, weight: the total in kg and lbs, what brings it, and the weight wanted (every point
+-- lighter by one factor, never below what the physics needs: S.applyTargetMass)
+S.drawWeightSection = function(player)
+  local id = player:getID()
+  ui_imgui.SeparatorText(L('Svoris'))
+  local okW, w = pcall(S.weightInfo, player)
+  if not okW or type(w) ~= 'table' then
+    imText('Nepavyko nuskaityti svorio.')
+    return
+  end
+  local lbs = 2.20462
+  imText(string.format('Viso: %.0f kg (%.0f lbs) - be kuro ir krovinio', w.total, w.total * lbs))
+  if w.target and w.natural > w.total + 1 then
+    imText(string.format('Sumazinta: tikras svoris %.0f kg (%.0f lbs)', w.natural, w.natural * lbs))
+  end
+  for _, g in ipairs(w.groups) do
+    local text = string.format('%s: %.0f kg (%.0f lbs, %.0f%%)', g.label, g.kg, g.kg * lbs, 100 * g.kg / math.max(1, w.total))
+    if g.key == 'own' and #w.own > 0 then
+      -- the car's own parts, the heaviest first (a hidden own body stays as a frame and weighs too)
+      if im.TreeNode1(text .. '##weightown') then
+        for k = 1, math.min(15, #w.own) do
+          local o = w.own[k]
+          ui_imgui.Text(S.esc(string.format('%s: %.0f kg', o.part, o.kg)))
+        end
+        im.TreePop()
+      end
+    else
+      ui_imgui.BulletText(S.esc(L(text)))
+    end
+  end
+  if w.stab >= 1 then
+    imText(string.format('Is to stabilumui pridetu mases: %.0f kg (sunkesni taskai, kad fizika nesprogtu)', w.stab))
+  end
+  -- the weight wanted: from the lightest it can be up to its real weight
+  local maxKg, minKg = math.max(w.natural, w.total), math.min(w.min, w.total)
+  if S.weightFor ~= id or not S.weightPtr then
+    S.weightFor = id
+    S.weightPtr = im.FloatPtr(w.target or maxKg)
+  end
+  sliderRow('Norimas svoris (kg)', S.weightPtr, 10, math.floor(minKg), math.ceil(maxKg), '%.0f kg')
+  S.weightPtr[0] = math.max(minKg, math.min(maxKg, S.weightPtr[0]))
+  imText(string.format('= %.0f lbs. Lengviausia galima: %.0f kg (%.0f lbs).', S.weightPtr[0] * lbs, minKg, minKg * lbs))
+  if im.IsItemHovered() then im.SetTooltip('Visi taskai (ne ratai) lengvinami vienodai, bet ne zemiau, nei reikia, kad fizika butu stabili - todel lengviausias svoris ribotas.') end
+  -- a weight tried before that blew the car up (S.onInstability undid it)
+  local failed = S.weightFailed and S.weightFailed[id]
+  if failed then
+    im.TextColored(im.ImVec4(1, 0.45, 0.3, 1), string.format('%d kg buvo per lengva sitai masinai (fizika nestabili) - rinkis daugiau.', failed))
+  end
+  if S.primaryButton('PRITAIKYTI##weight', im.ImVec2(S.px(200), 0)) then
+    local want = math.floor(S.weightPtr[0] + 0.5)
+    local set = want < maxKg - 1 and want or nil
+    if respawnWithConfig(player, function(cfg) cfg.partAttacher.targetMass = set end) then
+      -- if it blows up within a few seconds, the undo says it was too light (S.onInstability)
+      S.weightTry = set and {vid = id, want = want, at = os.clock()} or nil
+      if S.weightFailed and set and failed and want > failed then S.weightFailed[id] = nil end
+      msg(string.format('Svoris: %.0f kg (%.0f lbs).', want, want * lbs), 5)
+    end
+  end
+  if w.target then
+    im.SameLine()
+    if im.Button('Grazinti tikra svori##weightreset') then
+      S.weightPtr = nil
+      respawnWithConfig(player, function(cfg) cfg.partAttacher.targetMass = nil end)
+    end
+  end
+end
+
+-- the car's exhausts as loaded (S.applyExhaustOff): every start node with the outlets its pipes
+-- reach (the ends of the exhaust beams from it), and the ones switched off (their start mark is
+-- gone, their pipes kept). {cid, name, part, on, outlets = {cid...}}, by part and name
+S.exhaustList = function(player)
+  local id = player:getID()
+  local vd = getVData(id)
+  if not (vd and type(vd.nodes) == 'table') then return {} end
+  local off = {}
+  for _, e in ipairs(type(getPA(id).exhaustOff) == 'table' and getPA(id).exhaustOff or {}) do
+    if type(e) == 'table' and type(e.n) == 'string' then off[e.n] = true end
+  end
+  local adj = {}
+  for _, b in pairs(type(vd.beams) == 'table' and vd.beams or {}) do
+    if type(b) == 'table' and S.isExhaustFlag(b.isExhaust) and type(b.id1) == 'number' and type(b.id2) == 'number' then
+      adj[b.id1] = adj[b.id1] or {}
+      adj[b.id2] = adj[b.id2] or {}
+      table.insert(adj[b.id1], b.id2)
+      table.insert(adj[b.id2], b.id1)
+    end
+  end
+  local list = {}
+  for cid, n in pairs(vd.nodes) do
+    if type(n) == 'table' and type(n.name) == 'string' and (S.isExhaustFlag(n.isExhaust) or off[n.name]) then
+      -- its pipes, from the start: the ends (one beam, not the start itself) are where it lets out
+      local seen, stack, outlets = {[cid] = true}, {cid}, {}
+      while #stack > 0 do
+        local c = table.remove(stack)
+        if c ~= cid and #(adj[c] or {}) == 1 then outlets[#outlets + 1] = c end
+        for _, o in ipairs(adj[c] or {}) do
+          if not seen[o] then
+            seen[o] = true
+            stack[#stack + 1] = o
+          end
+        end
+      end
+      list[#list + 1] = {cid = cid, name = n.name, part = tostring(n.partOrigin or ''), on = not off[n.name], outlets = outlets}
+    end
+  end
+  table.sort(list, function(a, b)
+    if a.part ~= b.part then return a.part < b.part end
+    return a.name < b.name
+  end)
+  return list
+end
+
+-- an exhaust's row name: its part as the Parts menu names it, an added part's by its number
+S.exPartDesc = {}
+S.exhaustPartLabel = function(player, e)
+  local i = tonumber(e.name:match('^upa(%d+)_'))
+  if i then
+    local ex = getExtras(player:getID())[i]
+    if type(ex) == 'table' then return L(string.format('Prideta detale %d: %s', i, tostring(ex.part))) end
+  end
+  local model = tostring(player.jbeam)
+  if not S.exPartDesc[model] then
+    local names = {}
+    pcall(function() names = jbeamIO.getAvailableParts(jbeamIO.startLoading(modelDirs(model))) or {} end)
+    S.exPartDesc[model] = names
+  end
+  local d = S.exPartDesc[model][e.part]
+  d = type(d) == 'table' and type(d.description) == 'string' and d.description ~= '' and d.description or nil
+  return d and (d .. '  (' .. e.part .. ')') or e.part
+end
+
+-- section 4, exhausts: each exhaust (from its start: the engine's ports, an added exhaust's inlet)
+-- on or off, its outlets shown on the car (green on, red off, the one under the mouse bigger)
+S.drawExhaustSection = function(player)
+  local id = player:getID()
+  ui_imgui.SeparatorText(L('Ismetimas (dumai ir garsas)'))
+  local okL, list = pcall(S.exhaustList, player)
+  if not okL or type(list) ~= 'table' or #list == 0 then
+    imText('Si masina neturi ismetimo.')
+    return
+  end
+  imText('Kiekvienas ismetimas prasideda prie variklio (ar pridetos detales) ir leidzia dumus pro savo galus. Isjunk nereikalinga - pvz. variklio, kai uzdejai kitus duslintuvus.')
+  S.exShowPtr = S.exShowPtr or im.BoolPtr(true)
+  if S.exFor ~= id or not S.exOn then S.exFor, S.exOn = id, {} end
+  local changed, anyOn, hover = false, false, nil
+  for _, e in ipairs(list) do
+    if S.exOn[e.name] == nil then S.exOn[e.name] = e.on end
+  end
+  -- the car's own exhaust (every start that is not an added part's: its engine's ports) in one tick;
+  -- the added mufflers keep theirs
+  local own, ownOn = {}, false
+  for _, e in ipairs(list) do
+    if not e.name:find('^upa%d+_') then
+      own[#own + 1] = e
+      if S.exOn[e.name] then ownOn = true end
+    end
+  end
+  if #own > 0 then
+    local ptr = im.BoolPtr(ownOn)
+    if im.Checkbox('Originalaus variklio dumai##exhown', ptr) then
+      for _, e in ipairs(own) do S.exOn[e.name] = ptr[0] end
+    end
+    if im.IsItemHovered() then
+      im.SetTooltip('Nuimk varnele - masinos savo variklio ismetimas nebeleis dumu ir garso (pridetu duslintuvu lieka). Tada PRITAIKYTI.')
+      hover = 'own'
+    end
+  end
+  -- every exhaust on its own
+  if im.TreeNode1('Visi ismetimai (detaliai)##exhlist') then
+    for k, e in ipairs(list) do
+      local ptr = im.BoolPtr(S.exOn[e.name])
+      -- part and point names as the car has them: not run through the window's translation
+      local label = S.exhaustPartLabel(player, e) .. ' - ' .. e.name .. '   ' .. L(string.format('(galu: %d)', #e.outlets))
+      if ui_imgui.Checkbox(label .. '##exh' .. k, ptr) then S.exOn[e.name] = ptr[0] end
+      if im.IsItemHovered() then hover = e.name end
+    end
+    im.TreePop()
+  end
+  for _, e in ipairs(list) do
+    if S.exOn[e.name] ~= e.on then changed = true end
+    if S.exOn[e.name] then anyOn = true end
+  end
+  im.Checkbox('Rodyti angas ant masinos##exhshow', S.exShowPtr)
+  if not anyOn then imText('Visi isjungti: dumu nebus, ismetimo garsas eis is variklio.') end
+  if changed then
+    if S.primaryButton('PRITAIKYTI##exhaust', im.ImVec2(S.px(200), 0)) then
+      local offList = {}
+      for _, e in ipairs(list) do
+        if not S.exOn[e.name] then offList[#offList + 1] = {n = e.name, p = e.part} end
+      end
+      if respawnWithConfig(player, function(cfg) cfg.partAttacher.exhaustOff = #offList > 0 and offList or nil end) then
+        msg('Ismetimas pritaikytas.', 5)
+        S.exOn = nil
+      end
+    end
+    im.SameLine()
+    imText('Pakeista - spausk PRITAIKYTI (masina persikraus).')
+  end
+  if S.exShowPtr[0] and S.exOn then
+    local vehPos = player:getPosition()
+    for _, e in ipairs(list) do
+      local col = S.exOn[e.name] and ColorF(0.2, 1, 0.3, 0.8) or ColorF(1, 0.2, 0.2, 0.8)
+      local big = hover == e.name or (hover == 'own' and not e.name:find('^upa%d+_'))
+      local r = big and 0.12 or 0.06
+      for _, cid in ipairs(e.outlets) do
+        local okP, p = pcall(function() return player:getNodePosition(cid) + vehPos end)
+        if okP and p then debugDrawer:drawSphere(p, r, col) end
+      end
+    end
+  end
+end
+
+-- tab "Salonas": the car's steering wheel, shifter and seats (found in its parts tree by their slot
+-- names), each swappable for any part of that kind of the model picked in section 1; a swapped one
+-- can be nudged (X / Y / Z) or put back
+-- the picked car part (S.interiorPick) wears the donor part n of the car model from now on: moved
+-- from the donor part's place to the car part's own (when both are found), the car reloads
+S.interiorSwapTo = function(player, model, n)
+  local carPart, kind = S.interiorPick, S.interiorPickKind
+  if not (carPart and kind and model and n) then return end
+  local okM, mv, found, pivot = pcall(S.interiorAutoMove, player, carPart, model, n, kind)
+  if not okM then mv, found, pivot = {0, 0, 0}, false, nil end
+  S.intAdj[carPart], S.intRot[carPart] = nil, nil
+  if respawnWithConfig(player, function(cfg)
+    local list = type(cfg.partAttacher.interiorSwaps) == 'table' and cfg.partAttacher.interiorSwaps or {}
+    for j = #list, 1, -1 do if list[j].carPart == carPart then table.remove(list, j) end end
+    list[#list + 1] = {kind = kind, carPart = carPart, model = model, part = n, move = mv, pivot = pivot}
+    cfg.partAttacher.interiorSwaps = list
+  end) then
+    msg(found and string.format('%s pakeista i %s (%s). Jei reikia, pataisyk vieta X / Y / Z.', carPart, n, model)
+      or string.format('%s pakeista i %s (%s), bet vieta nerasta - pastumk ja X / Y / Z.', carPart, n, model), 8)
+  end
+end
+
+S.drawInteriorSection = function(player)
+  if not player then imText('Isek i masina.') return end
+  local id = player:getID()
+  local d = core_vehicle_manager.getVehicleData(id)
+  local swaps = type(getPA(id).interiorSwaps) == 'table' and getPA(id).interiorSwaps or {}
+  local slots = {}
+  local function walk(node, depth)
+    if type(node) ~= 'table' or depth > 14 then return end
+    for slotName, child in pairs(node.children or {}) do
+      local chosen = type(child) == 'table' and child.chosenPartName
+      if type(chosen) == 'string' and chosen ~= '' and not chosen:find('^upa') then
+        local kind = S.interiorKind(slotName)
+        if kind then slots[#slots + 1] = {slot = slotName, part = chosen, kind = kind} end
+      end
+      walk(child, depth + 1)
+    end
+  end
+  walk(d and d.config and d.config.partsTree, 0)
+  table.sort(slots, function(a, b) return a.kind .. a.slot < b.kind .. b.slot end)
+  imText('1. Pasirink savo masinos vaira, pavaru rankena ar sedyne. 2. Pasirink donoro detale is bet kurios masinos (filtre gali rasyti masinos ar detales varda).')
+  if #slots == 0 then imText('Nerasta vairo, pavaru rankenos ar sedyniu.') end
+  S.intAdj, S.intRot = S.intAdj or {}, S.intRot or {}
+  for i, s in ipairs(slots) do
+    local spec
+    for _, sp in ipairs(swaps) do if sp.carPart == s.part then spec = sp end end
+    local label = string.format('%s: %s', L(S.interiorKinds[s.kind]), s.part)
+    if spec then label = label .. string.format('  ->  %s (%s)', tostring(spec.part), tostring(spec.model)) end
+    if im.Selectable1(label .. '##int' .. i, S.interiorPick == s.part) then S.interiorPick, S.interiorPickKind = s.part, s.kind end
+    if spec and S.interiorPick == s.part then
+      -- the swapped one: nudge it, or put the car's own back
+      local adj = S.intAdj[s.part]
+      if not adj then
+        local a = type(spec.adjust) == 'table' and spec.adjust or {}
+        adj = {im.FloatPtr(tonumber(a[1]) or 0), im.FloatPtr(tonumber(a[2]) or 0), im.FloatPtr(tonumber(a[3]) or 0)}
+        S.intAdj[s.part] = adj
+      end
+      sliderRow('Pataisyti X (sonas)', adj[1], 0.01, -1, 1, '%.3f m')
+      sliderRow('Pataisyti Y (pirmyn/atgal)', adj[2], 0.01, -1, 1, '%.3f m')
+      sliderRow('Pataisyti Z (aukstis)', adj[3], 0.01, -1, 1, '%.3f m')
+      -- its turn about its spot (a steering wheel is already put on the car's column by itself)
+      local rot = S.intRot[s.part]
+      if not rot then
+        local r = type(spec.rot) == 'table' and spec.rot or {}
+        rot = {im.FloatPtr(tonumber(r[1]) or 0), im.FloatPtr(tonumber(r[2]) or 0), im.FloatPtr(tonumber(r[3]) or 0)}
+        S.intRot[s.part] = rot
+      end
+      if s.kind == 'steer' then imText('Donoro vairas pats pasukamas pagal tavo vairo kolonele. Jei reikia, pasuk ji X / Y / Z.') end
+      sliderRow('Pasvirimas (X)', rot[1], 1, -180, 180, '%.1f deg')
+      sliderRow('Pokrypis (Y)', rot[2], 1, -180, 180, '%.1f deg')
+      sliderRow('Pasukimas (Z)', rot[3], 1, -180, 180, '%.1f deg')
+      if im.Button('Pritaikyti vieta##intapply' .. i) then
+        local carPart = s.part
+        local pivot = spec.pivot
+        if type(pivot) ~= 'table' then
+          local okC, c = pcall(S.interiorCenter, player.jbeam, carPart, s.kind)
+          pivot = okC and c and {c.x, c.y, c.z} or nil
+        end
+        respawnWithConfig(player, function(cfg)
+          for _, sp in ipairs(type(cfg.partAttacher.interiorSwaps) == 'table' and cfg.partAttacher.interiorSwaps or {}) do
+            if sp.carPart == carPart then
+              sp.adjust = {adj[1][0], adj[2][0], adj[3][0]}
+              sp.rot = {rot[1][0], rot[2][0], rot[3][0]}
+              sp.pivot = sp.pivot or pivot
+            end
+          end
+        end)
+      end
+      im.SameLine()
+      if im.Button('Grazinti savo##intback' .. i) then
+        local carPart = s.part
+        S.intAdj[carPart], S.intRot[carPart] = nil, nil
+        respawnWithConfig(player, function(cfg)
+          local list = type(cfg.partAttacher.interiorSwaps) == 'table' and cfg.partAttacher.interiorSwaps or {}
+          for k = #list, 1, -1 do if list[k].carPart == carPart then table.remove(list, k) end end
+          cfg.partAttacher.interiorSwaps = #list > 0 and list or nil
+        end)
+      end
+    end
+  end
+  -- the donor part of the picked kind, from any car (the search list in all cars, S.idx: read
+  -- a few ms a frame the first time); the filter keeps the rows with every word of it in the
+  -- part's or its car's name
+  if S.interiorPick then
+    ui_imgui.Separator()
+    imText(string.format('Donoro detale is visu masinu - %s:', L(S.interiorKinds[S.interiorPickKind] or '')))
+    S.idxStart()
+    if not S.idx.done then
+      imText(string.format('Renkamos visu masinu detales... %d%%', S.idxProgress()))
+      return
+    end
+    S.intFilterPtr = S.intFilterPtr or im.ArrayChar(64)
+    im.InputText('Filtras##intfilter', S.intFilterPtr, 64)
+    local words = {}
+    for w in ffi.string(S.intFilterPtr):lower():gmatch('%S+') do words[#words + 1] = w end
+    local okD, all = pcall(S.interiorDonorsAll, S.interiorPickKind)
+    if not okD or type(all) ~= 'table' then all = {} end
+    local shown, total = 0, 0
+    if im.BeginChild1('##intdonors', im.ImVec2(0, S.px(220)), true) then
+      for k, e in ipairs(all) do
+        local hit = true
+        for _, w in ipairs(words) do
+          if not e.p.lower:find(w, 1, true) then hit = false break end
+        end
+        if hit then
+          total = total + 1
+          if shown < maxListedParts then
+            shown = shown + 1
+            -- names as the cars have them: not run through the window's translation
+            local car = e.p.model == 'common' and L('bendra detale') or e.car
+            if ui_imgui.Selectable1(car .. ':  ' .. e.p.label .. '##intd' .. k, false) then
+              -- a common part comes with the player's own car (any car has it)
+              S.interiorSwapTo(player, e.p.model == 'common' and player.jbeam or e.p.model, e.p.name)
+            end
+          end
+        end
+      end
+      if total == 0 then imText('Nieko nerasta.') end
+      if total > shown then imText(string.format('... ir dar %d', total - shown)) end
+    end
+    im.EndChild()
   end
 end
 
@@ -10449,11 +12749,55 @@ S.drawCutSection = function(player)
       S.cutPosPtr[0] = tonumber(current.y) - info.lo.y
       S.cutKeepFront = current.keep ~= 'rear'
     end
+    -- the parts the last cut took (none: the whole car)
+    S.cutByParts, S.cutPicked = S.cutHasParts(current), {}
+    for _, p in ipairs(S.cutByParts and current.parts or {}) do S.cutPicked[p] = true end
   end
+  S.cutPicked = S.cutPicked or {}
 
   im.TextColored(im.ImVec4(1, 0.75, 0.2, 1), L('EKSPERIMENTINE funkcija: gali glitchinti, issisaugok masina pries pjaudamas.'))
   imText('Nupjauk savo masinos gala plokstuma arba isplauk joje skyle: kvadrata, apvalia ar vamzdi.')
   imText('Per pjuvi einantys modeliai perpjaunami tikrai (pirmas pjuvis uztrunka sekunde). Pridetos detales ir pakeistos pakabos lieka.')
+  -- what the cut takes: the whole car, or only the parts ticked in the list (the rest stays whole,
+  -- even beyond the cut)
+  imText('Ka pjauti:')
+  im.SameLine()
+  local wholeButton = S.cutByParts and im.Button or S.primaryButton
+  if wholeButton('Visa masina##cutwhole', im.ImVec2(0, 0)) then S.cutByParts = false end
+  im.SameLine()
+  local partsButton = S.cutByParts and S.primaryButton or im.Button
+  if partsButton('Tik pasirinktas detales##cutbyparts', im.ImVec2(0, 0)) then S.cutByParts = true end
+  if im.IsItemHovered() then im.SetTooltip('Pjuvis paima tik pazymetas detales (pvz. tik buferi ar tik dureles) - visa kita lieka sveika, net jei yra uz pjuvio.') end
+  local picked = {}
+  if S.cutByParts then
+    S.cutPartFilterPtr = S.cutPartFilterPtr or im.ArrayChar(64)
+    im.InputText('Filtras##cutpartfilter', S.cutPartFilterPtr, 64)
+    local words = {}
+    for w in ffi.string(S.cutPartFilterPtr):lower():gmatch('%S+') do words[#words + 1] = w end
+    local okP, parts = pcall(S.cutCarParts, player)
+    if not okP or type(parts) ~= 'table' then parts = {} end
+    if im.BeginChild1('##cutparts', im.ImVec2(0, S.px(160)), true) then
+      for k, p in ipairs(parts) do
+        local hit = true
+        for _, w in ipairs(words) do
+          if not p.lower:find(w, 1, true) then hit = false break end
+        end
+        if hit then
+          -- part names as the car has them: not run through the window's translation
+          local ptr = im.BoolPtr(S.cutPicked[p.name] == true)
+          if ui_imgui.Checkbox(p.label .. '##cutpart' .. k, ptr) then S.cutPicked[p.name] = ptr[0] or nil end
+        end
+      end
+    end
+    im.EndChild()
+    for _, p in ipairs(parts) do
+      if S.cutPicked[p.name] then picked[#picked + 1] = p.name end
+    end
+    table.sort(picked)
+    imText(string.format('Pazymeta detaliu: %d', #picked))
+    im.SameLine()
+    if im.SmallButton('Nuimti visas##cutpartnone') then S.cutPicked = {} end
+  end
   for i, sh in ipairs(S.cutShapeList) do
     if i > 1 then im.SameLine() end
     local button = S.cutShape == sh[1] and S.primaryButton or im.Button
@@ -10534,13 +12878,18 @@ S.drawCutSection = function(player)
 
   -- a new cut adds to the ones the car has
   if S.primaryButton('PJAUTI##cutapply', im.ImVec2(-1, 0)) then
-    local list = deepcopy(cuts)
-    list[#list + 1] = spec
-    if S.applyCutList(player, list) then
-      if spec.shape then
-        msg(string.format('Isplauta skyle: %s.', S.cutShapeName[spec.shape]), 6)
-      else
-        msg(string.format('Masina nupjauta %.2f m nuo priekio, lieka %s.', spec.y - info.lo.y, spec.keep == 'rear' and 'galas' or 'priekis'), 6)
+    if S.cutByParts and #picked == 0 then
+      msg('Pasirink bent viena detale, kuria pjauti.', 5)
+    else
+      if S.cutByParts then spec.parts = picked end
+      local list = deepcopy(cuts)
+      list[#list + 1] = spec
+      if S.applyCutList(player, list) then
+        if spec.shape then
+          msg(string.format('Isplauta skyle: %s.', S.cutShapeName[spec.shape]), 6)
+        else
+          msg(string.format('Masina nupjauta %.2f m nuo priekio, lieka %s.', spec.y - info.lo.y, spec.keep == 'rear' and 'galas' or 'priekis'), 6)
+        end
       end
     end
   end
@@ -10553,6 +12902,12 @@ S.drawCutSection = function(player)
         imText(string.format('%d. skyle: %s, %.2f m nuo priekio', i, S.cutShapeName[c.shape], (tonumber(c.cy) or info.lo.y) - info.lo.y))
       else
         imText(string.format('%d. plokstuma %.2f m nuo priekio, lieka %s', i, (tonumber(c.y) or info.lo.y) - info.lo.y, c.keep == 'rear' and 'galas' or 'priekis'))
+      end
+      -- one for picked parts only: how many, their names on the mouse
+      if S.cutHasParts(c) then
+        im.SameLine()
+        imText(string.format('(tik %d detales)', #c.parts))
+        if im.IsItemHovered() then ui_imgui.SetTooltip(S.esc(table.concat(c.parts, '\n'))) end
       end
       im.SameLine()
       if im.SmallButton('Nuimti') then
@@ -10569,6 +12924,48 @@ S.drawCutSection = function(player)
   imText('Prie pjuvio gali prideti kitos masinos pakaba (Detale, pakabos aplankas) ar detales.')
 end
 
+-- the car's own parts with points or models, for the cut's part list: {name, label, lower}, by
+-- label ("Front Bumper  (etk800_bumper_F)"). Added parts and swapped suspensions are left out (a
+-- cut never takes them). Kept with the vehicle data (a cut or any change builds it again).
+S.cutCarParts = function(player)
+  local vd = getVData(player:getID())
+  if not vd then return {} end
+  if S.cutPartsCache and S.cutPartsCache.vd == vd then return S.cutPartsCache.list end
+  local function own(n)
+    local name = type(n) == 'table' and n.name
+    return type(n) == 'table' and not (type(name) == 'string' and (name:find('^upa%d+_') or name:find('^ups%w+_')))
+      and not (type(n.partOrigin) == 'string' and n.partOrigin:find('^upa'))
+  end
+  local parts = {}
+  for _, n in pairs(type(vd.nodes) == 'table' and vd.nodes or {}) do
+    if own(n) and type(n.partOrigin) == 'string' then parts[n.partOrigin] = true end
+  end
+  -- a part with models only, on the car's own points
+  for _, fb in pairs(type(vd.flexbodies) == 'table' and vd.flexbodies or {}) do
+    local nodes = type(fb) == 'table' and (fb.upaGroupNodes or fb._group_nodes)
+    if type(fb) == 'table' and type(fb.partOrigin) == 'string' and not parts[fb.partOrigin] and type(nodes) == 'table'
+      and nodes[1] and own(vd.nodes[nodes[1]]) and not fb.partOrigin:find('^upa') then
+      parts[fb.partOrigin] = true
+    end
+  end
+  -- their Parts menu names
+  local names = {}
+  pcall(function()
+    local ioCtx = jbeamIO.startLoading(modelDirs(player.jbeam))
+    names = jbeamIO.getAvailableParts(ioCtx) or {}
+  end)
+  local list = {}
+  for part, _ in pairs(parts) do
+    local desc = type(names[part]) == 'table' and names[part].description
+    local d = type(desc) == 'string' and desc or ''
+    local label = (d ~= '' and d ~= part) and (d .. '  (' .. part .. ')') or part
+    list[#list + 1] = {name = part, label = label, lower = label:lower()}
+  end
+  table.sort(list, function(a, b) return a.lower < b.lower end)
+  S.cutPartsCache = {vd = vd, list = list}
+  return list
+end
+
 -- the car with these cuts (none: whole again): the models are cut by all of them at once
 S.applyCutList = function(player, list)
   local value
@@ -10576,7 +12973,7 @@ S.applyCutList = function(player, list)
     local cutter = S.makeCutter({cuts = list})
     if not cutter then return false end
     -- the models across the cuts, cut for real (reads the car's model files: a second or two)
-    local okB, meshes, summary, meshDir = pcall(S.buildCutMeshes, player, cutter)
+    local okB, meshes, summary, meshDir = pcall(S.buildCutMeshes, player, cutter, {cuts = list})
     if not okB then
       log('E', logTag, 'car cutter: cutting the models failed: ' .. tostring(meshes))
       meshes, summary = {}, 'failed'
@@ -10622,6 +13019,22 @@ S.cutPreview = function(e, list)
   end
   S.respawnGhost(e, nil)
   return true
+end
+
+-- the mirrored copies whose preview came up this frame (updateEntry) get their cut (S.spawnMirror):
+-- after the loop over the previews, as cutting builds the preview again
+S.tickPendingCuts = function()
+  local q = S.cutQueue
+  if not q then return end
+  S.cutQueue = nil
+  for _, id in ipairs(q) do
+    local e = entries[id]
+    if e and type(e.pendingCut) == 'table' then
+      local list = e.pendingCut
+      e.pendingCut = nil
+      if S.cutPreview(e, list) then msg('Detale nupjauta - stumdyk ir PRITVIRTINK.', 5) end
+    end
+  end
 end
 
 -- the preview's own cut: a plane across it (keep its front or its rear, turned if wanted); cuts add up
@@ -10970,6 +13383,7 @@ S.tabs = {
   {id = 'cut', label = 'Pjovimas', title = '7. Masinos pjovimas (experimental)'},
   {id = 'front', label = 'Kebulas', title = '8. Priekio ar viso kebulo swap is kitos masinos'},
   {id = 'save', label = 'Issaugota', title = '9. Issaugotos masinos'},
+  {id = 'interior', label = 'Salonas', title = '10. Salonas: vairas, pavaru rankena, sedynes is kitos masinos'},
 }
 
 -- a bigger UI size waits for approval: this small window stays at the normal size in the middle of
@@ -11037,6 +13451,7 @@ local function drawWindow()
     im.PopStyleColor(1)
     local player = getPlayerVehicle(0)
     im.TextColored(im.ImVec4(0.7, 0.7, 0.73, 1), 'Masina: ' .. (player and (player.jbeam or '?') .. ' #' .. player:getID() or 'nera'))
+    pcall(S.drawModProblems, player)
 
     -- what the tabs hold, with counts where it helps (previews open, parts / swaps on the car)
     local previews = 0
@@ -11065,13 +13480,17 @@ local function drawWindow()
         ui_imgui.SeparatorText(L('1. Pasirinkti detale'))
         drawSpawnSection(player)
       end,
-      inst = function() drawInstalledSection(player) end,
+      inst = function()
+        drawInstalledSection(player)
+        if player then S.drawWeightSection(player) end
+      end,
       dt = function() drawDrivetrainSection(player) end,
       susp = function() drawSuspSection(player) end,
       safe = function() S.drawSafetySection(player) end,
       cut = function() S.drawCutSection(player) end,
       front = function() S.drawFrontSection(player) end,
       save = function() S.drawSavedSection(player) end,
+      interior = function() S.drawInteriorSection(player) end,
     }
     if im.BeginTabBar('##partAttacherTabs', im.TabBarFlags_FittingPolicyResizeDown) then
       for _, t in ipairs(S.tabs) do
@@ -11129,6 +13548,8 @@ local function drawWindow()
     -- leave the window open or the theme pushed (ImGui's stacks would be out of balance)
     if im.Begin('Part Attacher by Kavencki - Giedrius P.###partAttacherWindow', showWindow) then
       local ok, err = pcall(content)
+      -- shown in the window too (S.drawModProblems), not only in the log
+      if not ok then S.windowErr = {text = tostring(err), at = os.clock()} end
       if not ok and err ~= S.lastWindowError then
         S.lastWindowError = err
         log('E', logTag, 'window: ' .. tostring(err))
@@ -11187,6 +13608,11 @@ local function updateEntry(e, dt)
         e.placeOnRoof = nil
       end
       e.state = 'ready'
+      -- its cut is made after this frame's loop over the previews (it builds the preview again)
+      if e.pendingCut then
+        S.cutQueue = S.cutQueue or {}
+        S.cutQueue[#S.cutQueue + 1] = e.id
+      end
     elseif e.stateTimer > 15 then
       msg('Detale nepasikrove.', 6)
       deleteEntry(e)
@@ -11201,7 +13627,184 @@ local function updateEntry(e, dt)
   if e.hold and target and e.tA then holdGhost(e, ghost, target) end
 end
 
+--------------------------------------------------------------------------------
+-- other mods' errors: the game calls every extension's hook one after another with nothing between
+-- them, so one mod's error stops all the rest - a car that never loads (Hands on the Wheel 0.4.1's
+-- onJbeamLoadingPhase2 asked for a file its zip lacks: every spawn failed, the car came as an
+-- empty shell and nothing of this mod worked on it), a game that forgets a deleted car (a screen
+-- dimmer's onVehicleDestroyed), windows that skip frames (onUpdate). Each other mod's function for
+-- these hooks (a mod's zip, not the game's own files) gets a guard: its error is caught, the game
+-- goes on, and the player is told which mod it was (once; the window lists them).
+--------------------------------------------------------------------------------
+S.guardHooks = {'onJbeamLoadingPhase2', 'onVehicleDestroyed', 'onVehicleSpawned', 'onVehicleResetted', 'onVehicleSwitched', 'onUpdate'}
+S.guardWrappers = setmetatable({}, {__mode = 'k'}) -- the guards (never guarded again)
+S.guardSeen = setmetatable({}, {__mode = 'k'}) -- function -> its mod, or false (the game's own, an unpacked folder)
+S.brokenMods = {} -- zip -> {title, zip, hooks = {hook = true}, err, count}
+S.guardTimer = 0
+
+-- the mod a game file is in: {name, zip, title, file} (a mod's zip, or a folder in mods/unpacked),
+-- or nil for the game's own files. Kept per file.
+S.modFileCache = {}
+S.modOfFile = function(file)
+  if type(file) ~= 'string' or file == '' then return nil end
+  local src = file:gsub('^[@=]', '')
+  src = src:match('^%[string "(.-)"%]$') or src
+  if src:sub(1, 1) ~= '/' then src = '/' .. src end
+  local cached = S.modFileCache[src]
+  if cached ~= nil then return cached or nil end
+  local res = false
+  pcall(function()
+    local mm = rawget(_G, 'core_modmanager')
+    if type(mm) == 'table' and type(mm.getModForFilename) == 'function' then
+      local name, mod = mm.getModForFilename(src)
+      if name then
+        local zip = type(mod) == 'table' and type(mod.fullpath) == 'string' and mod.fullpath:match('([^/]+)$') or tostring(name)
+        local title = type(mod) == 'table' and type(mod.modData) == 'table' and mod.modData.title
+        res = {name = name, zip = zip, title = (type(title) == 'string' and title ~= '') and title or zip, file = src}
+        return
+      end
+    end
+    -- an unpacked mod (the game's mod manager knows only zips): by its folder
+    local real = tostring(FS:getFileRealPath(src) or '')
+    local folder = real:match('[/\\][Mm]ods[/\\]unpacked[/\\]([^/\\]+)[/\\]')
+    if folder then res = {name = folder, zip = folder .. ' (unpacked)', title = folder, file = src} end
+  end)
+  S.modFileCache[src] = res
+  return res or nil
+end
+
+-- the mod a function's file is in, or false (the game's own)
+S.modOfFunction = function(fn)
+  local seen = S.guardSeen[fn]
+  if seen ~= nil then return seen end
+  local res = false
+  pcall(function() res = S.modOfFile(tostring(debug.getinfo(fn, 'S').source or '')) or false end)
+  S.guardSeen[fn] = res
+  return res
+end
+
+-- another mod failed (a guarded hook of it, or a part of it this mod can't read): logged and told
+-- once per mod (and once more per other place); the window lists them (S.drawModProblems).
+-- partName: a part of it that was skipped
+S.noteBrokenMod = function(mod, hook, err, partName)
+  local text = tostring(err):gsub('\n.*', '')
+  local b = S.brokenMods[mod.zip]
+  if not b then
+    b = {title = mod.title, zip = mod.zip, hooks = {}, err = text, count = 0}
+    S.brokenMods[mod.zip] = b
+    log('W', logTag, string.format('another mod failed in %s: %s (%s, %s) - %s. Its error was caught so the game goes on.',
+      hook, mod.title, mod.zip, tostring(mod.file), text))
+    if partName then
+      pcall(msg, string.format('Modo "%s" detale "%s" sugadinta (%s) - Part Attacher ja praleido. Jei kas truksta, isjunk ta moda.', mod.title, tostring(partName), hook), 12)
+    else
+      pcall(msg, string.format('Modas "%s" meta klaida (%s) - Part Attacher ja sugavo, kad zaidimas veiktu toliau. Jei kas neveikia, isjunk ta moda.', mod.title, hook), 12)
+    end
+  elseif not b.hooks[hook] then
+    log('W', logTag, string.format('%s (%s) failed in %s too: %s', mod.title, mod.zip, hook, text))
+  end
+  b.hooks[hook] = true
+  b.count = b.count + 1
+end
+
+-- a part this mod can't read (its error, or data written wrong): skipped; a mod's is named to the
+-- player (S.noteBrokenMod), the game's own only logged
+S.partProblemLogged = {}
+S.notePartProblem = function(partName, file, err, what)
+  local mod = S.modOfFile(file)
+  if mod then
+    S.noteBrokenMod(mod, what, string.format('%s (%s): %s', tostring(partName), tostring(file), tostring(err)), partName)
+    return
+  end
+  local key = tostring(partName) .. '|' .. tostring(what)
+  if not S.partProblemLogged[key] then
+    S.partProblemLogged[key] = true
+    log('W', logTag, string.format('%s: part %s (%s) skipped: %s', tostring(what), tostring(partName), tostring(file), tostring(err)))
+  end
+end
+
+-- under the window's title: the other mods whose errors were caught (their names, the details on the
+-- mouse), and a car that did not load (no points for 3 s: most likely another mod broke its loading)
+S.drawModProblems = function(player)
+  local red = im.ImVec4(1, 0.45, 0.3, 1)
+  if next(S.brokenMods) ~= nil then
+    local names, lines = {}, {L('Ju klaidas Part Attacher sugavo, kad zaidimas veiktu. Jei kas neveikia, isjunk juos ir paleisk zaidima is naujo.')}
+    for _, b in pairs(S.brokenMods) do
+      names[#names + 1] = b.title
+      local hooks = {}
+      for h, _ in pairs(b.hooks) do hooks[#hooks + 1] = h end
+      lines[#lines + 1] = string.format('%s (%s) - %s: %s', b.title, b.zip, table.concat(hooks, ', '), b.err)
+    end
+    table.sort(names)
+    -- mod names as they are: only the words around them translated
+    ui_imgui.TextColored(red, S.esc(L(string.format('Klaidingi kiti modai: %s', table.concat(names, ', ')))))
+    if im.IsItemHovered() then ui_imgui.SetTooltip(S.esc(table.concat(lines, '\n'))) end
+  end
+  -- an error in this window (the last 10 s): its mod when its file is another mod's, else this
+  -- mod's own (to send to its author)
+  local we = S.windowErr
+  if we and os.clock() - we.at < 10 then
+    local mod = S.modOfFile(we.text:match('%[string "(.-)"%]') or we.text:match('(lua/[%w_/%.%-]+%.lua)'))
+    local own = mod and (mod.file or ''):find('partAttacher', 1, true)
+    local line = we.text:gsub('\n.*', '')
+    if mod and not own then
+      ui_imgui.TextColored(red, S.esc(L(string.format('Klaida is modo "%s": %s', mod.title, line))))
+    else
+      ui_imgui.TextColored(red, S.esc(L(string.format('Part Attacher klaida: %s (atsiusk beamng.log autoriui)', line))))
+    end
+    if im.IsItemHovered() then ui_imgui.SetTooltip(S.esc(we.text)) end
+  end
+  local empty = player and (tonumber(player:getNodeCount()) or 0) < 3
+  if not empty then
+    S.noNodesSince = nil
+  else
+    S.noNodesSince = S.noNodesSince or os.clock()
+    if os.clock() - S.noNodesSince > 3 then
+      im.TextColored(red, 'Tavo masina neuzsikrove (be tasku) - ja greiciausiai sugadino kitas modas (ziurek beamng.log).')
+    end
+  end
+end
+
+-- every loaded extension's hook functions from a mod's zip get their guard (again every few
+-- seconds: mods load later, or set new functions)
+S.guardOtherMods = function()
+  local okN, names = pcall(extensions.getLoadedExtensionsNames)
+  if not okN or type(names) ~= 'table' then return 0 end
+  local wrapped, touched = 0, {}
+  for _, extName in ipairs(names) do
+    local m = rawget(extensions, extName)
+    if type(m) == 'table' and not rawequal(m, M) then
+      for _, hook in ipairs(S.guardHooks) do
+        local fn = rawget(m, hook)
+        if type(fn) == 'function' and not S.guardWrappers[fn] then
+          local mod = S.modOfFunction(fn)
+          if mod then
+            local orig = fn
+            local guard = function(...)
+              local ok, err = pcall(orig, ...)
+              if not ok then S.noteBrokenMod(mod, hook, err) end
+            end
+            S.guardWrappers[guard] = true
+            m[hook] = guard
+            wrapped = wrapped + 1
+            touched[hook] = true
+          end
+        end
+      end
+    end
+  end
+  -- the game keeps each hook's functions in a list: made again with the guards
+  for hook, _ in pairs(touched) do pcall(extensions.hookUpdate, hook) end
+  if wrapped > 0 then log('I', logTag, string.format('other mods: %d hook functions guarded (an error in one of them no longer stops the game)', wrapped)) end
+  return wrapped
+end
+
 local function onUpdate(dtReal, dtSim, dtRaw)
+  S.guardTimer = S.guardTimer - (tonumber(dtReal) or 0)
+  if S.guardTimer <= 0 then
+    S.guardTimer = 3
+    local okG, errG = pcall(S.guardOtherMods)
+    if not okG then log('E', logTag, 'guarding the other mods failed: ' .. tostring(errG)) end
+  end
   for _, e in pairs(entries) do
     local ok, err = pcall(updateEntry, e, dtReal)
     if not ok then
@@ -11209,6 +13812,8 @@ local function onUpdate(dtReal, dtSim, dtRaw)
       e.hold = false
     end
   end
+  local okQ, errQ = pcall(S.tickPendingCuts)
+  if not okQ then log('E', logTag, 'cutting the mirrored copy failed: ' .. tostring(errQ)) end
   pcall(S.checkFontScale)
   pcall(S.tickUndo, dtReal)
   drawWindow()
@@ -11222,6 +13827,15 @@ local function onUpdate(dtReal, dtSim, dtRaw)
   if not okK then
     log('E', logTag, 'part list check: ' .. tostring(errK))
     S.classify = nil
+  end
+  -- the search in all cars: its list read a few ms a frame
+  if S.idx and not S.idx.done then
+    local okI, errI = pcall(S.idxStep, 0.008)
+    if not okI then
+      log('E', logTag, 'search in all cars: ' .. tostring(errI))
+      S.idx = nil
+      S.allCarsPtr[0] = false
+    end
   end
   local okB, errB = pcall(S.batchTick, dtReal)
   if not okB then
@@ -11270,12 +13884,31 @@ S.cutList = function(cut)
   return {}
 end
 
+-- a cut of the car can take only the parts picked for it (section 7, "Tik pasirinktas detales"):
+-- c.parts = their names (a point's / mesh's partOrigin); none = the whole car
+S.cutHasParts = function(c) return type(c) == 'table' and type(c.parts) == 'table' and #c.parts > 0 end
+S.cutApplies = function(c, part)
+  if not S.cutHasParts(c) then return true end
+  for _, p in ipairs(c.parts) do
+    if p == part then return true end
+  end
+  return false
+end
+-- whether any of the car's cuts is for picked parts only
+S.cutFiltered = function(cut)
+  for _, c in ipairs(S.cutList(cut)) do
+    if S.cutHasParts(c) then return true end
+  end
+  return false
+end
+
 -- all the cuts together: a point goes when any of them takes it (depth: the deepest one, so the
--- distance to the nearest cut surface outside them all). One cut is just that cut.
-S.makeCutter = function(cut)
+-- distance to the nearest cut surface outside them all). One cut is just that cut. part: only the
+-- cuts that take that part (nil: all of them, whatever they take); nil when none does
+S.makeCutter = function(cut, part)
   local list = {}
   for _, c in ipairs(S.cutList(cut)) do
-    local one = S.makeOneCutter(c)
+    local one = (part == nil or S.cutApplies(c, part)) and S.makeOneCutter(c)
     if one then list[#list + 1] = one end
   end
   if #list == 0 then return nil end
@@ -11621,7 +14254,9 @@ end
 -- the meshes of the car (the spawned one) across a cut at jbeam y0, cut and written once (a file
 -- per mesh and cut position, reused after that). Returns {original mesh = cut mesh name, or false
 -- when nothing of it stays} and a summary.
-S.buildCutMeshes = function(veh, cutter)
+-- cut: the car's cuts ({cuts = ...}) when some take picked parts only - a mesh is then cut by the
+-- cuts that take its own part (none: it stays whole)
+S.buildCutMeshes = function(veh, cutter, cut)
   local vd = getVData(veh:getID())
   if not (vd and type(vd.flexbodies) == 'table' and type(vd.nodes) == 'table') then return {}, 'no vehicle data' end
   local function own(cid)
@@ -11629,12 +14264,20 @@ S.buildCutMeshes = function(veh, cutter)
     local name = type(nd) == 'table' and nd.name
     return nd ~= nil and not (type(name) == 'string' and (name:find('^upa%d+_') or name:find('^ups%w+_')))
   end
+  local filtered = cut ~= nil and S.cutFiltered(cut)
+  local partCutters = {}
   local wanted, order = {}, {}
   for _, fb in pairs(vd.flexbodies) do
     -- the jbeam name: the game may rename a loaded mesh (originalMesh), a cut keeps it in upaOrigMesh
     local mesh = type(fb) == 'table' and (fb.upaOrigMesh or fb.originalMesh or fb.mesh)
     local nodes = type(fb) == 'table' and (fb.upaGroupNodes or fb._group_nodes)
-    if type(mesh) == 'string' and type(nodes) == 'table' and not wanted[mesh] then
+    local fbCutter = cutter
+    if filtered and type(fb) == 'table' then
+      local key = tostring(fb.partOrigin)
+      if partCutters[key] == nil then partCutters[key] = S.makeCutter(cut, fb.partOrigin or '') or false end
+      fbCutter = partCutters[key] or nil
+    end
+    if fbCutter and type(mesh) == 'string' and type(nodes) == 'table' and not wanted[mesh] then
       -- a mesh to cut: some of its nodes go, not all. A hole can be smaller than the gaps between a
       -- panel's nodes (a 30 cm hole in a door with no node inside it): for a hole, a mesh with a node
       -- within 40 cm of it is cut too (S.cutDaeMesh finds whether its triangles really cross it)
@@ -11642,18 +14285,19 @@ S.buildCutMeshes = function(veh, cutter)
       for _, cid in ipairs(nodes) do
         if own(cid) then
           ownCount = ownCount + 1
-          local d = cutter.depth(vec3(veh:getInitialNodePosition(cid)))
+          local d = fbCutter.depth(vec3(veh:getInitialNodePosition(cid)))
           if d > 0 then beyondCount = beyondCount + 1 end
           if d > -0.4 then nearCount = nearCount + 1 end
         end
       end
-      local crosses = beyondCount > 0 or (cutter.kind ~= 'plane' and nearCount > 0)
+      local crosses = beyondCount > 0 or (fbCutter.kind ~= 'plane' and nearCount > 0)
       local r = type(fb.rot) == 'table' and fb.rot or {}
       local rotated = math.abs(tonumber(r.x) or 0) + math.abs(tonumber(r.y) or 0) + math.abs(tonumber(r.z) or 0) > 0.01
       if crosses and beyondCount < ownCount and not rotated then
         local pos, scale = type(fb.pos) == 'table' and fb.pos or {}, type(fb.scale) == 'table' and fb.scale or {}
         local function sc(v) v = tonumber(v) or 1 return math.abs(v) > 1e-6 and v or 1 end
-        wanted[mesh] = {pos = {tonumber(pos.x) or 0, tonumber(pos.y) or 0, tonumber(pos.z) or 0}, scale = {sc(scale.x), sc(scale.y), sc(scale.z)}}
+        wanted[mesh] = {pos = {tonumber(pos.x) or 0, tonumber(pos.y) or 0, tonumber(pos.z) or 0}, scale = {sc(scale.x), sc(scale.y), sc(scale.z)},
+          cutter = fbCutter}
         order[#order + 1] = mesh
       end
     end
@@ -11716,11 +14360,12 @@ S.buildCutMeshes = function(veh, cutter)
           -- the file name: the cut as seen in the mesh's own space (one mesh file may serve several
           -- flexbodies placed apart)
           local tag
-          if cutter.kind == 'plane' then
-            local plane = (cutter.y0 - w.pos[2]) / w.scale[2]
-            tag = string.format('%s%d', cutter.keepFront and 'f' or 'r', math.floor(plane * 1000 + 0.5)):gsub('%-', 'm')
+          local mc = w.cutter or cutter
+          if mc.kind == 'plane' then
+            local plane = (mc.y0 - w.pos[2]) / w.scale[2]
+            tag = string.format('%s%d', mc.keepFront and 'f' or 'r', math.floor(plane * 1000 + 0.5)):gsub('%-', 'm')
           else
-            tag = cutter.kind .. '_' .. S.shortHash(cutter.label .. string.format(' pos %.4f %.4f %.4f scale %.4f %.4f %.4f',
+            tag = mc.kind .. '_' .. S.shortHash(mc.label .. string.format(' pos %.4f %.4f %.4f scale %.4f %.4f %.4f',
               w.pos[1], w.pos[2], w.pos[3], w.scale[1], w.scale[2], w.scale[3]))
           end
           local newName = mesh .. '_upacut_' .. tag
@@ -11729,7 +14374,7 @@ S.buildCutMeshes = function(veh, cutter)
             result[mesh] = newName
             reused = reused + 1
           else
-            local okC, dae, why = pcall(S.cutDaeMesh, text, mesh, newName, cutter, w)
+            local okC, dae, why = pcall(S.cutDaeMesh, text, mesh, newName, mc, w)
             if okC and dae then
               if not FS:directoryExists(outDir) then FS:directoryCreate(outDir, true) end
               writeFile(outPath, dae)
@@ -11835,8 +14480,22 @@ S.applyCut = function(vehicle, cut, marker, opts)
     end
     return true
   end
-  local nodeGoes = opts.goneNode or function(n) return beyond(n.pos) end
-  local wheelGoes = opts.wheelGoes or function(n1, n2) return beyond((n1.pos + n2.pos) * 0.5) end
+  -- cuts for picked parts only: a point (a wheel by its hub's first point, a mesh by its own part)
+  -- goes only by the cuts that take its part
+  local filtered = not opts.goneNode and S.cutFiltered(cut)
+  local partCutters = {}
+  local function cutterOf(part)
+    if not filtered then return cutter end
+    local key = tostring(part)
+    if partCutters[key] == nil then partCutters[key] = S.makeCutter(cut, part or '') or false end
+    return partCutters[key] or nil
+  end
+  local function goesFor(n, p)
+    local c = cutterOf(n.partOrigin)
+    return c ~= nil and c.goes(p)
+  end
+  local nodeGoes = opts.goneNode or function(n) return goesFor(n, n.pos) end
+  local wheelGoes = opts.wheelGoes or function(n1, n2) return goesFor(n1, (n1.pos + n2.pos) * 0.5) end
   local defaultMass = tonumber(type(vehicle.options) == 'table' and vehicle.options.nodeWeight) or 25
 
   -- a wheel goes (or stays) whole, by its hub's side: a cut through a tyre keeps the tyre round
@@ -12067,7 +14726,8 @@ S.applyCut = function(vehicle, cut, marker, opts)
         if not removed[cid] then keptNodes[#keptNodes + 1] = cid end
       end
       local cutNodes = #nodes - #keptNodes
-      local swap = cutMeshes[fb.mesh]
+      -- (a mesh of a part no cut takes is not swapped for a cut one: another part's mesh of that name was)
+      local swap = cutterOf(fb.partOrigin) and cutMeshes[fb.mesh] or nil
       -- a hole can cut a mesh none of whose nodes go (its triangles cross it between them)
       if cutNodes > 0 or type(swap) == 'string' then
         fb.upaGroupNodes = nodes
@@ -12138,8 +14798,9 @@ S.applyCut = function(vehicle, cut, marker, opts)
     -- cut one must lie the same way from the new ref, or the axes fold and turn NaN. When any of
     -- them is cut off (or the ref is close to the cut), the set moves 0.6 m into the kept part.
     local refNode = vehicle.nodes[refs.ref]
+    -- (cuts for picked parts only: only when one of them went - the rest of the car is whole there)
     if refNode and (removed[refs.ref] or removed[refs.back] or removed[refs.left] or removed[refs.up]
-      or math.abs(depth(refNode.pos)) < 0.5) then
+      or (not filtered and math.abs(depth(refNode.pos)) < 0.5)) then
       local origin = refNode.pos
       local spot
       if math.abs(depth(origin)) >= 0.6 and not beyond(origin) then
@@ -12529,6 +15190,16 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
     local ok, res = true, 'built from the donor tuning parts'
     if (tonumber(swap.version) or 1) == 3 then ok, res = pcall(applyEngineData, vehicle, swap.engineData) end
     log(ok and 'I' or 'E', logTag, string.format('engine logic swap %s: data %s', tostring(swap.part), ok and (res == true and 'applied' or tostring(res)) or tostring(res)))
+    -- the donor's pulleys (props) on the car's block: their pivots from the donor's model file
+    local okP, errP = pcall(S.placeExtraProps, vehicle)
+    if not okP then log('E', logTag, 'placing the swapped engine\'s props failed: ' .. tostring(errP)) end
+    -- a resized engine with "power by size": its torque / kW go with its volume
+    local k = S.enginePowerFactor(swap)
+    if math.abs(k - 1) > 1e-3 then
+      local okK, resK = pcall(S.scaleEngineTorque, vehicle, k)
+      log(okK and 'I' or 'E', logTag, okK and string.format('engine swap power by size: torque x%.2f (%d curve points)', k, resK)
+        or ('engine swap power by size failed: ' .. tostring(resK)))
+    end
 
     -- donor data may use a $variable that only the donor car defines: left unresolved it stays a
     -- "$..." string where the engine code expects a number and the whole vehicle fails to load
@@ -12550,6 +15221,14 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
       end
     end
     swap = nil
+  end
+
+  -- a second engine (an added engine): its torque onto the car's engine (after the car's own engine
+  -- is final - swapped, sized)
+  do
+    local okE2, resE2 = pcall(S.applyEngine2, vehicle, marker.extraParts)
+    if not okE2 then log('E', logTag, 'second engine failed: ' .. tostring(resE2))
+    elseif resE2 then log('I', logTag, resE2) end
   end
 
   -- swapped engine (v1/v2): tie the new block to the bay (mount beams of the donor rarely match the car)
@@ -12940,13 +15619,47 @@ local function onJbeamLoadingPhase2(loadingProgress, objID, vehicle, unifyJourna
   end
   if fixedL > 0 then log('W', logTag, string.format('%d LBEAMs without their third node made plain beams', fixedL)) end
 
-  -- a body swap: the riskiest nodes of the whole car for the 2 kHz step, and beams of no length
+  -- an added part with physics (a body swap too): the riskiest nodes of the whole car for the 2 kHz
+  -- step, and beams of no length - in the load log, to find what blew a car up
   for _, ex in ipairs(type(marker.extraParts) == 'table' and marker.extraParts or {}) do
-    if type(ex) == 'table' and type(ex.frontEnd) == 'table' and ex.frontEnd.body then
+    if type(ex) == 'table' and not ex.meshOnly then
       local okR, errR = pcall(S.reportRiskiestNodes, vehicle)
       if not okR then log('E', logTag, 'node check failed: ' .. tostring(errR)) end
       break
     end
+  end
+
+  -- an indestructible engine: the vehicle side (partAttacherEngineGuard) takes its damage away,
+  -- here its block's own beams stop bending and breaking (before the settle time keeps the originals)
+  if marker.indestructibleEngine and not marker.ghost then
+    local okI, resI = pcall(S.hardenEngine, vehicle)
+    log(okI and 'I' or 'E', logTag, 'indestructible engine: ' .. tostring(resI))
+  end
+  -- interior swaps: the donor's turning wheel / moving lever placed by its model file's pivot
+  if type(marker.interiorSwaps) == 'table' and #marker.interiorSwaps > 0 and not marker.ghost then
+    local okP, errP = pcall(S.placeExtraProps, vehicle)
+    if not okP then log('E', logTag, 'placing the interior swap props failed: ' .. tostring(errP)) end
+    local okO, errO = pcall(S.orientInteriorProps, vehicle)
+    if not okO then log('E', logTag, 'turning the interior swap props failed: ' .. tostring(errO)) end
+  end
+  -- a lighter car (section 3): the masses as asked, after every other change made its points
+  if tonumber(marker.targetMass) and not marker.ghost then
+    local okM, resM = pcall(S.applyTargetMass, vehicle, marker.targetMass)
+    log(okM and 'I' or 'E', logTag, 'target weight: ' .. tostring(resM))
+  end
+  -- exhaust outlets switched off in section 4 (after the added exhausts got their starts)
+  if type(marker.exhaustOff) == 'table' and #marker.exhaustOff > 0 and not marker.ghost then
+    local okE, resE = pcall(S.applyExhaustOff, vehicle, marker.exhaustOff)
+    log(okE and 'I' or 'E', logTag, 'exhaust outlets: ' .. tostring(resE))
+  end
+  -- the unkillable clutch and the extreme radiator live on the vehicle side (partAttacherEngineGuard)
+  if marker.unkillableClutch and not marker.ghost then
+    vehicle.upaUnkillableClutch = true
+    log('I', logTag, 'unkillable clutch: on (never slips, heats or wears)')
+  end
+  if marker.extremeRadiator and not marker.ghost then
+    vehicle.upaExtremeRadiator = true
+    log('I', logTag, 'extreme radiator: on (the engine never overheats)')
   end
 
   -- settle time: for the first seconds after a spawn / reset nothing bends or breaks while the new
@@ -13060,6 +15773,7 @@ end
 local function onExtensionLoaded()
   installLoaderHooks()
   S.installSpawnHook()
+  pcall(S.guardOtherMods)
   log('I', logTag, 'Part Attacher ' .. S.version .. ' by Kavencki - Giedrius P. loaded. Ctrl+Shift+Y or partAttacher.toggleWindow()')
 end
 
@@ -13070,7 +15784,7 @@ local function onExtensionUnloaded()
   pcall(S.batchStop)
   for _, e in pairs(entries) do
     local ghost = getVeh(e.id)
-    if ghost then ghost:delete() end
+    if ghost then S.deleteVeh(ghost) end
   end
   entries = {}
 end

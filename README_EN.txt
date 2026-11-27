@@ -1,6 +1,6 @@
 PART ATTACHER - any part from any vehicle, on any vehicle (BeamNG.drive 0.40)
 ==============================================================================
-Mod author: Kavencki - Giedrius P.        Version: 1.4.6 beta
+Mod author: Kavencki - Giedrius P.        Version: 1.5 beta
 (c) 2026 Kavencki. All rights reserved. Do not re-upload, redistribute or
 publish this mod as your own without the author's permission.
 
@@ -19,6 +19,18 @@ WHAT IT DOES
 - SAFETY ELECTRONICS on any vehicle: ABS, traction control, stability control,
   2-step launch control, line lock.
 - FRONT END and WHOLE BODY SWAP: another vehicle's front or whole body on yours.
+- INTERIOR: any vehicle's steering wheel, shifter or seats in yours (the wheel
+  turns itself to your steering column).
+- SEARCH IN ALL VEHICLES: find a part (a diffuser, a seat...) in every vehicle and
+  mod at once.
+- CAR CUTTER: cut your vehicle or only the parts you pick with a plane or a hole
+  (box, ball, tube); the models are cut for real.
+- SECOND ENGINE, engine / gearbox size with power by size, INDESTRUCTIBLE ENGINE,
+  a clutch that never slips and a radiator that never overheats.
+- WEIGHT: what the vehicle weighs and what brings it, and a lighter weight if you
+  want; EXHAUST outlets on / off (e.g. the engine's own after new mufflers).
+- Other mods' errors are caught and the mod is named, so one broken mod can't
+  stop your vehicle from loading.
 - SAVED VEHICLES: save a finished vehicle by name and spawn it again later.
 - REAR WHEEL STEERING (4WS) like the Pessima AWS, and a DIFFERENT WHEEL ON EVERY
   CORNER, picked in the game's own Parts menu.
@@ -41,7 +53,7 @@ BeamNG.drive/current/mods) and enable it in the in-game Mod Manager.
 QUICK START
 -----------
 The window's sections are tabs at its top: Part (sections 1 and 2), Installed
-(3), Drivetrain (4), Suspension (5), Electronics (6), Cut (7), Body (8), Saved (9).
+(3), Drivetrain (4), Suspension (5), Electronics (6), Cut (7), Body (8), Saved (9), Interior (10).
 When a preview appears, its position (section 2) shows on top of the same Part tab - no other tab needed.
 
 1. Get into the vehicle you want to modify.
@@ -51,6 +63,11 @@ When a preview appears, its position (section 2) shows on top of the same Part t
 3. Section 1: pick the "Model" you want a part FROM. Its parts are shown like
    the game's own Parts menu (slot tree; the default part is marked *), with the
    swap folders on top. Or type in "Search parts".
+   With "In all cars" ticked the search goes through the parts of ALL cars (mods
+   too): e.g. "diffuser" or "rear seat" (all the words must be in it), each with
+   its car next to it. Clicking a part picks its car and the part. The first time
+   the list takes a while to build (a percentage shows), then it is saved and comes
+   at once the next time (only changed files are read again).
 4. Press the button at the bottom of section 1: a PREVIEW of the part appears.
 5. Section 2: move / rotate it (X / Y / Z, pitch / roll / yaw; type an exact
    value in the field next to a slider), then press ATTACH. Your vehicle reloads with the
@@ -200,14 +217,47 @@ ENGINE SWAP  (folder ">> ENGINE SWAP")
 A LOGIC swap: your engine's physics (block, mounts) stay, so nothing breaks or
 flies off. The donor's power and torque curves, revs, inertia, sound and (if you
 want) its model come over. The donor's tuning slots (ECU, internals, intake /
-turbo, N2O) appear in the normal Parts menu under the engine. Your gearbox and
-fuel stay yours; extra engine outputs (air compressor, PTO on trucks) keep working.
+turbo, N2O) appear in the normal Parts menu under the engine, with their own
+names, and the Engine row shows the donor engine's name. Your gearbox, exhaust,
+engine mounts and oil pan stay yours (they hold the block); extra engine outputs
+(air compressor, PTO on trucks) keep working.
+- The donor's belt pulleys (and a supercharger's pulley) come with its model and
+  spin with the revs. If you turn or resize the engine in the preview, they come
+  as fixed models (turned and sized with the engine, but not spinning).
+- SIZE: the engine preview has "Size (scale)" / "Size per axis X / Y / Z" like a
+  part - only the model grows or shrinks (with its pulleys and tuning parts),
+  the physics stay your engine's. The Installed tab shows the size.
+- "Power (kW / Nm) by size" (on by default, under the size): a bigger engine has
+  a bigger displacement - torque and power change with the engine's volume
+  (width x length x height: x1.30 all round = x2.20, x0.80 = x0.51; at most x25).
+  A turbo / supercharger boosts along with it, N2O keeps its own power. Engine
+  friction and engine braking change with it too, so a small engine still idles.
+  Off: the donor's power stays whatever the size.
+
+
+SECOND ENGINE  (folder ">> ENGINE SWAP", "ADD AS A SECOND ENGINE")
+-------------
+Your engine stays, the picked engine comes next to it as a second one (like a
+part with physics: place it, size it, ATTACH). The game's drivetrain can't let
+two engines turn one shaft, so the second engine's torque - its own curve with
+its ECU, intake and internals - is added to your engine's: both turn together
+at the same rpm, so torque AND power add up (kW = torque x rpm). Its friction,
+engine braking and inertia join too. Its pulleys spin with the revs.
+- The Parts menu shows it as "Second engine N" with its own slots (ECU, intake,
+  internals, gearbox...) - change them like any part.
+- Its own turbo / supercharger, nitrous and sound don't work on their own (your
+  engine's turbo / supercharger boosts both). Its gearbox is only a model.
+- "Power (kW / Nm) by size" works for it too when you resize it.
+- Untick sub parts you don't want (its gearbox...) in the preview's "Comes with".
 
 
 GEARBOX SWAP  (folder ">> GEARBOX SWAP")
 ------------
 Any gearbox (manual / automatic / DCT / CVT / sequential). Tick "Also enable the
 universal drivetrain" so the power reaches the wheels with any gearbox.
+- SIZE: the gearbox preview has "Size (scale)" / "Size per axis X / Y / Z" - the
+  gearbox and the parts below it (transfer case...) grow or shrink, model and
+  physics. The Installed tab shows the size.
 
 
 TURBO / SUPERCHARGER  (folder ">> TURBO / SUPERCHARGER (logic)")
@@ -306,6 +356,11 @@ Cut part of your vehicle off at a plane across it:
   folder that can't be cut stays whole, or goes if most of it is beyond the plane.
   Those files can be deleted any time; the next cut makes them again.
 - The wheels that stay are driven by the universal drivetrain (section 4).
+- "What to cut": "Whole vehicle" (as before) or "Only picked parts" - tick parts
+  in the list (e.g. only the bumper or only a door; "Filter" finds them by name)
+  and the cut takes only those. Everything else stays whole, even beyond the
+  cut. Cuts add up, each with its own parts (the list shows "(only N parts)",
+  the mouse on it shows which).
 - Parts you added and swapped suspensions are not cut: add another vehicle's
   suspension or parts at the cut to finish it. "Restore the whole vehicle"
   undoes the cut.
@@ -381,6 +436,23 @@ settings/partAttacher/cars/<name>.json. The list below it: "Spawn" replaces
 the vehicle you are in with that saved one (on any map), "Delete" (press twice)
 removes it.
 
+SECTION 10 - INTERIOR (tab "Interior")
+--------------------------------------
+Any steering wheel, shifter or seat from any vehicle in yours.
+1. In the Interior tab pick your steering wheel, shifter or a seat.
+2. The list below it has the parts of that kind from ALL vehicles (mods too), each
+   with its vehicle. "Filter": type a vehicle or part name (e.g. "etk" or "sport").
+   Click a part and the vehicle reloads with it. No need to pick a vehicle in
+   section 1. The first time the list takes a while to build (a percentage shows),
+   then it is saved.
+Your part stays - its points, its place, its logic (the wheel turns with the
+steering, the lever moves with the gears, you sit where you sat) - it just wears the
+donor's models, moved to where yours was. A donor steering wheel is turned to your
+steering column by itself (a truck's flat wheel in a car stands like your own wheel).
+If it sits a bit off, pick it again: "Adjust X / Y / Z" moves it, "Pitch (X)",
+"Roll (Y)", "Yaw (Z)" turn it (degrees, about its spot), then "Apply position".
+"Put my own back" undoes it.
+
 SAVING YOUR VEHICLE
 -------------------
 The game's own save works too (Vehicle Config > Save): everything the mod did -
@@ -429,6 +501,47 @@ gearbox stay, a battery takes the fuel tanks' place. What else ran off the engin
 (a truck's air compressor, a hydraulic pump) gets a small electric motor of its own on
 the same battery; N2O, anti-lag and the engine brake come off. "Bring the combustion engine
 back" undoes it all.
+
+INDESTRUCTIBLE ENGINE, CLUTCH, RADIATOR (section 4, at the bottom)
+------------------------------------------------------------------
+Tick any of them and press APPLY (the vehicle reloads); untick and APPLY to undo.
+- "Engine never breaks": not from over-revving, too much torque, water (hydrolock),
+  overheating (head gasket, piston rings, bearings, a melted block), lack of oil or a
+  crash. Its block no longer bends or breaks. It still stops without fuel or with the
+  ignition off. Works for an electric motor (EV swap) too.
+- "Clutch never slips or burns": the clutch holds three times the torque the strongest
+  engine can give (power by size, a second engine and boost included) and never heats
+  up, wears or breaks; the clutch pedal still disengages it. A DCT's clutches too. An
+  automatic's torque converter slips as usual - that is how an automatic pulls away.
+- "Extreme radiator - never overheats": coolant, oil, block and cylinders never get
+  hotter than a healthy warm engine (95 C coolant), whatever the load, a damaged
+  radiator or lost coolant.
+
+WEIGHT (section 3, at the bottom)
+--------------------------------
+"Total" - what the vehicle weighs (without fuel and cargo), in kg and lbs, and what
+brings it: your vehicle's own parts (opens, the heaviest first; a hidden own body
+weighs too), each added part, each swap (with its wheels, hubs, brakes and the
+donor's frame points - another vehicle's suspension can weigh a few hundred kg),
+the mod's helper points, and how much mass the stability fix added.
+"Weight wanted (kg)": every point (not the wheels) gets lighter by the same share,
+but never below what stable physics needs - so the lightest weight is limited
+(shown next to it). APPLY - the vehicle reloads lighter; "Back to the real weight"
+undoes it. If it still goes unstable, the change is undone and the window says that
+weight was too light - pick more.
+
+EXHAUST - SMOKE AND SOUND (section 4, at the bottom)
+---------------------------------------------------
+Quickest: untick "Original engine's smoke" and press APPLY - your vehicle's own
+engine exhaust lets out no smoke or sound any more, the added mufflers keep theirs.
+In detail ("All exhausts (in detail)"):
+every exhaust of the vehicle (the engine's, and each added muffler's) is in the list
+with a tick and its number of outlets. Untick the ones you don't want smoke and sound
+from - e.g. the engine's own exhaust after you put other mufflers on and smoke came
+from under the engine too - and press APPLY (the vehicle reloads). "Show the outlets
+on the vehicle": green - outlets on, red - off, the mouse on a row makes its outlets
+bigger. With all of them off there is no smoke, and the exhaust sound comes from the
+engine.
 
 REAR WHEEL STEERING (4WS, section 5, at the bottom)
 --------------------------------------------------
@@ -502,6 +615,18 @@ TROUBLESHOOTING
 - After changing mod files: Ctrl+L reloads Lua, Ctrl+R reloads the vehicle.
 - "Instability detected": try the suspension LOGIC button instead of a geometry
   swap, or a donor closer in size to your vehicle.
+- Other mods: the game runs every mod's vehicle loading and update code one after
+  another, so one broken mod used to stop all the rest (a vehicle that never
+  loads, swaps that do nothing). Part Attacher now catches such errors so the
+  game goes on, and names the mod: a message once, "Faulty other mods: ..." under
+  the window's title (the mouse on it shows each mod's file and error), and a
+  line in beamng.log. If something doesn't work, switch that mod off. "Your
+  vehicle did not load" there means another mod broke its loading.
+- A part another mod brings that can't be read (data written wrong, e.g. a broken
+  "slotType") is skipped on its own - the part list and the swap folders are built
+  anyway - and its mod is named the same way ("The mod ... has a broken part ...").
+  An error in the window itself shows in red under its title for a while ("Part
+  Attacher error: ..." - send beamng.log to the author).
 
 KNOWN LIMITATIONS (beta)
 ------------------------
